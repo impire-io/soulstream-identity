@@ -3,15 +3,16 @@
 The identity plane of the Soulstream ecosystem: the representation of
 identity for humans and agents — identity vault, signing oracle, NATS
 credential minting — as a NATS-only service with xkey-sealed E2E
-request/reply. Connections are creds-file bypass or auth callout; the
-shipped socket agent is transitional until the NATS-native rebuild (M3).
+request/reply on the caller's own subject prefix (server-enforced principal,
+D15). Connections are creds-file bypass or auth callout (M4 next); the
+vault rides NATS KV, sealed to a deployment-supplied first key.
 Module `github.com/impire-io/soulidentity`, Go 1.26.
 
 **How this project is run lives in `hq/` — read [`AGENTS.md`](AGENTS.md)
 first** (orientation order + the non-negotiables), then hold decisions against
 `hq/00-GENESIS/`. Where things stand: `hq/04-JOURNEY/README.md`. The plan:
 `hq/03-IMPLEMENTATION/ROADMAP.md`. The design with its D-numbered decisions
-(cited from code comments): `hq/02-DESIGN/` (D1–D13 in `agent.md`, D14–D17
+(cited from code comments): `hq/02-DESIGN/` (D1–D13 in `agent.md`, D14–D18
 in `nats-surface.md`).
 
 Conventions:

@@ -1,8 +1,9 @@
-// Package vault is the agent's keystore: named secrets on disk, signatures out,
-// seeds never. Every secret lives in its own 0600 file under a 0700 directory;
-// the API surface above this package exposes public keys and signing operations
-// only — the sole exception is ExportSeed, the explicit custody escape used by
-// credential export (hq/02-DESIGN/agent.md D7).
+// Package vault is the service's keystore: named secrets sealed at rest,
+// signatures out, seeds never. Records are sealed to the deployment-supplied
+// first key (hq/02-DESIGN/agent.md D13) before they reach the storage backend
+// (D10) — the backend only ever holds ciphertext. The API surface above this
+// package exposes public keys and signing operations only; the sole exception
+// is ExportSeed, the explicit custody escape used by credential export (D7).
 package vault
 
 import (
@@ -11,10 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/nats-io/nkeys"
 )
@@ -26,7 +26,7 @@ const (
 	// KindNATSAccountSigningKey is an account (signing) nkey seed ("SA…"): mints
 	// user JWTs. Scoped signing keys are the recommended shape (hq/02-DESIGN/agent.md D5).
 	KindNATSAccountSigningKey Kind = "nats-account-signing-key"
-	// KindNATSUserKey is a user nkey seed ("SU…"): signs NATS connection nonces.
+	// KindNATSUserKey is a user nkey seed ("SU…"): the minted identities' keys.
 	KindNATSUserKey Kind = "nats-user-key"
 	// KindPersonaSigningKey is a Soulstream persona's Ed25519 seed (base64,
 	// 32 bytes — the `soulstream key init` file format): signs canonical records.
@@ -40,38 +40,75 @@ type Entry struct {
 	PublicKey string `json:"public_key"`
 }
 
-// Sentinel errors; the agent maps them to HTTP statuses.
+// Sentinel errors; the service maps them to wire errors.
 var (
 	ErrExists   = errors.New("vault: key already exists (keys are immutable; import under a new name)")
 	ErrNotFound = errors.New("vault: no such key")
 )
 
-// stored is the on-disk form. Secret is the seed in its kind's native encoding.
+// Store is the storage backend seam (hq/02-DESIGN/agent.md D10): it moves
+// opaque sealed bytes and never sees plaintext. NATS KV is the initial
+// backend; MemStore serves tests.
+type Store interface {
+	// Create stores sealed under name, refusing an existing name (ErrExists).
+	Create(name string, sealed []byte) error
+	// Get returns the sealed bytes for name (ErrNotFound when absent).
+	Get(name string) ([]byte, error)
+	// Names lists every stored name.
+	Names() ([]string, error)
+}
+
+// stored is the record shape sealed into the backend. Secret is the seed in
+// its kind's native encoding.
 type stored struct {
 	Kind      Kind   `json:"kind"`
 	Secret    string `json:"secret"`
 	PublicKey string `json:"public_key"`
 }
 
-// Vault is a directory of secret files. It is not safe for concurrent writers
-// across processes; the agent is the single writer by design.
+// Vault seals records to the first key and hands the backend ciphertext only.
+// Single-writer by design: the service is the one process holding the key.
 type Vault struct {
-	dir string
+	store    Store
+	first    nkeys.KeyPair
+	firstPub string
 }
 
-// Open creates (0700) or opens the vault directory.
-func Open(dir string) (*Vault, error) {
-	if dir == "" {
-		return nil, errors.New("vault: a directory is required")
+// New opens a vault over store, unsealing with the deployment-supplied first
+// key ("SX…" curve seed — hq/02-DESIGN/agent.md D13).
+func New(store Store, firstKeySeed string) (*Vault, error) {
+	if store == nil {
+		return nil, errors.New("vault: a store is required")
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("vault: create %s: %w", dir, err)
+	kp, err := nkeys.FromCurveSeed([]byte(strings.TrimSpace(firstKeySeed)))
+	if err != nil {
+		return nil, fmt.Errorf("vault: first key is not a curve (SX…) seed: %w", err)
 	}
-	return &Vault{dir: dir}, nil
+	pub, err := kp.PublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("vault: first key public half: %w", err)
+	}
+	return &Vault{store: store, first: kp, firstPub: pub}, nil
+}
+
+// Verify fails fast when the store already holds records the first key cannot
+// open — a mis-supplied seed must not double-seal a vault (hq/02-DESIGN/nats-surface.md).
+func (v *Vault) Verify() error {
+	names, err := v.store.Names()
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	if _, err := v.load(names[0]); err != nil {
+		return fmt.Errorf("vault: store holds records this first key cannot open (probe %s): %w", names[0], err)
+	}
+	return nil
 }
 
 // checkName enforces the vault's name grammar: path-like ("user/<acc>/<daan>"),
-// each segment [A-Za-z0-9._-]+, no escapes. Names are file paths, so the
+// each segment [A-Za-z0-9._-]+, no escapes. Names are backend keys, so the
 // grammar is the security boundary.
 func checkName(name string) error {
 	if name == "" {
@@ -91,10 +128,6 @@ func checkName(name string) error {
 		}
 	}
 	return nil
-}
-
-func (v *Vault) file(name string) string {
-	return filepath.Join(v.dir, filepath.FromSlash(name)+".json")
 }
 
 // derive validates a secret for its kind and returns the public key.
@@ -141,24 +174,16 @@ func (v *Vault) Import(name string, kind Kind, secret string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	data, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub})
+	plain, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub})
 	if err != nil {
 		return Entry{}, fmt.Errorf("vault: encode key: %w", err)
 	}
-	path := v.file(name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return Entry{}, fmt.Errorf("vault: create key dir: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	sealed, err := v.first.Seal(plain, v.firstPub)
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return Entry{}, fmt.Errorf("%w: %s", ErrExists, name)
-		}
-		return Entry{}, fmt.Errorf("vault: store key %s: %w", name, err)
+		return Entry{}, fmt.Errorf("vault: seal key %s: %w", name, err)
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.Write(data); err != nil {
-		return Entry{}, fmt.Errorf("vault: store key %s: %w", name, err)
+	if err := v.store.Create(name, sealed); err != nil {
+		return Entry{}, err
 	}
 	return Entry{Name: name, Kind: kind, PublicKey: pub}, nil
 }
@@ -190,15 +215,16 @@ func (v *Vault) load(name string) (stored, error) {
 	if err := checkName(name); err != nil {
 		return stored{}, err
 	}
-	data, err := os.ReadFile(v.file(name))
+	sealed, err := v.store.Get(name)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return stored{}, fmt.Errorf("%w: %s", ErrNotFound, name)
-		}
-		return stored{}, fmt.Errorf("vault: read key %s: %w", name, err)
+		return stored{}, err
+	}
+	plain, err := v.first.Open(sealed, v.firstPub)
+	if err != nil {
+		return stored{}, fmt.Errorf("vault: key %s cannot be unsealed: %w", name, err)
 	}
 	var s stored
-	if err := json.Unmarshal(data, &s); err != nil {
+	if err := json.Unmarshal(plain, &s); err != nil {
 		return stored{}, fmt.Errorf("vault: key %s is unreadable: %w", name, err)
 	}
 	return s, nil
@@ -215,49 +241,20 @@ func (v *Vault) Get(name string) (Entry, error) {
 
 // List returns every entry (public form), sorted by name.
 func (v *Vault) List() ([]Entry, error) {
-	var out []Entry
-	err := filepath.WalkDir(v.dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".json") {
-			return err
-		}
-		rel, rerr := filepath.Rel(v.dir, path)
-		if rerr != nil {
-			return rerr
-		}
-		name := strings.TrimSuffix(filepath.ToSlash(rel), ".json")
-		e, gerr := v.Get(name)
-		if gerr != nil {
-			return gerr
+	names, err := v.store.Names()
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	out := make([]Entry, 0, len(names))
+	for _, name := range names {
+		e, err := v.Get(name)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, e)
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	return out, nil
-}
-
-// SignNonce signs a NATS connection nonce with an nkey entry (challenge-
-// response authentication; hq/02-DESIGN/agent.md D1). Returns the raw signature bytes the
-// nats client protocol expects.
-func (v *Vault) SignNonce(name string, nonce []byte) ([]byte, error) {
-	s, err := v.load(name)
-	if err != nil {
-		return nil, err
-	}
-	if s.Kind != KindNATSAccountSigningKey && s.Kind != KindNATSUserKey {
-		return nil, fmt.Errorf("vault: %s is %q — nonce signing needs an nkey", name, s.Kind)
-	}
-	kp, err := nkeys.FromSeed([]byte(s.Secret))
-	if err != nil {
-		return nil, fmt.Errorf("vault: key %s is unreadable: %w", name, err)
-	}
-	sig, err := kp.Sign(nonce)
-	if err != nil {
-		return nil, fmt.Errorf("vault: sign nonce with %s: %w", name, err)
-	}
-	return sig, nil
 }
 
 // SignRecord signs canonical record bytes with a persona key, returning the
@@ -279,7 +276,7 @@ func (v *Vault) SignRecord(name string, canonical []byte) (string, error) {
 }
 
 // KeyPair hands the in-process keypair to the minter. It is deliberately not
-// reachable over the agent API: the process boundary is the custody boundary.
+// reachable over the service API: the process boundary is the custody boundary.
 func (v *Vault) KeyPair(name string) (nkeys.KeyPair, error) {
 	s, err := v.load(name)
 	if err != nil {
@@ -303,4 +300,49 @@ func (v *Vault) ExportSeed(name string) (string, error) {
 		return "", err
 	}
 	return s.Secret, nil
+}
+
+// MemStore is an in-memory Store for tests and ephemeral use; it holds the
+// same sealed bytes a real backend would.
+type MemStore struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}
+
+// NewMemStore returns an empty MemStore.
+func NewMemStore() *MemStore {
+	return &MemStore{m: map[string][]byte{}}
+}
+
+// Create implements Store.
+func (s *MemStore) Create(name string, sealed []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[name]; ok {
+		return fmt.Errorf("%w: %s", ErrExists, name)
+	}
+	s.m[name] = append([]byte(nil), sealed...)
+	return nil
+}
+
+// Get implements Store.
+func (s *MemStore) Get(name string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sealed, ok := s.m[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+	return append([]byte(nil), sealed...), nil
+}
+
+// Names implements Store.
+func (s *MemStore) Names() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	names := make([]string, 0, len(s.m))
+	for name := range s.m {
+		names = append(names, name)
+	}
+	return names, nil
 }

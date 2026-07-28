@@ -4,7 +4,7 @@
 over NATS request/reply with xkey-sealed payloads (D11), the caller's NATS
 identity as the principal (D12), and the vault on its initial KV backend
 (D10, D13). Decisions here continue the numbering from
-[`agent.md`](agent.md): D14–D17. The milestone and its gate live in
+[`agent.md`](agent.md): D14–D18. The milestone and its gate live in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## What it covers
@@ -20,20 +20,27 @@ The socket surface, the `NATSOption` client seam, the file keystore, and the
 
 ## The operations
 
-| Subject (op suffix) | Milestone-1 op | Body shapes |
-|---|---|---|
-| `soulidentity.status` *(open)* | `GET /v1/status` | unchanged |
-| `soulidentity.xkey` *(open, new)* | — | `{"xkey": "<service curve public key>"}` |
-| `soulidentity.<acct>.<user>.keys.list` | `GET /v1/keys` | unchanged |
-| `soulidentity.<acct>.<user>.keys.import` | `POST /v1/keys` | unchanged |
-| `soulidentity.<acct>.<user>.identities.list` | `GET /v1/identities` | unchanged |
-| `soulidentity.<acct>.<user>.identities.put` | `POST /v1/identities` | unchanged |
-| `soulidentity.<acct>.<user>.sign.record` | `POST /v1/sign/record` | unchanged |
-| `soulidentity.<acct>.<user>.mint` | `POST /v1/mint` | unchanged (creds export stays the loud D7 escape) |
-| — | `POST /v1/sign/nonce` | **retired** — the nonce oracle left the connection story (D1, journey 0003) |
+| Subject (op suffix) | Milestone-1 op | Authorization (D18) | Body shapes |
+|---|---|---|---|
+| `soulidentity.status` *(open)* | `GET /v1/status` | none | unchanged |
+| `soulidentity.xkey` *(open, new)* | — | none | `{"xkey": "<service curve public key>"}` |
+| `soulidentity.<acct>.<user>.keys.list` | `GET /v1/keys` | admin | unchanged |
+| `soulidentity.<acct>.<user>.keys.import` | `POST /v1/keys` | admin | unchanged |
+| `soulidentity.<acct>.<user>.identities.list` | `GET /v1/identities` | admin | unchanged |
+| `soulidentity.<acct>.<user>.identities.put` | `POST /v1/identities` | admin | unchanged |
+| `soulidentity.<acct>.<user>.sign.record` | `POST /v1/sign/record` | act-as (D6) | unchanged; `key` must be `persona/<persona>` |
+| `soulidentity.<acct>.<user>.mint` | `POST /v1/mint` | self, or admin for others | unchanged (creds export stays the loud D7 escape) |
+| — | `POST /v1/sign/nonce` | — | **retired** — the nonce oracle left the connection story (D1, journey 0003) |
 
-`client/` rebuilds on NATS request/reply with the same mirror types; the
-socket transport and `NATSOption` go with it.
+The `<acct>` token is the account **public key** (`A…`) — exactly how the
+registry keys identities — and `<user>` is the name within it. Persona keys
+live at the vault-name convention `persona/<persona>`: that binding is what
+act-as (D6) is enforced against, so record signing outside it is refused.
+
+`client/` speaks NATS request/reply with the same mirror types
+(`New(nc, account, user)`; `SignRecord` takes the persona name); the socket
+transport and `NATSOption` are gone. The service key pin of D16 is the
+client's `WithServiceXKey` option.
 
 ## D14 — The subject space is principal-scoped, and unversioned
 
@@ -41,8 +48,10 @@ Operations live at `soulidentity.<account>.<user>.<op>`, with exactly two
 open subjects outside the principal scope: `soulidentity.status` and
 `soulidentity.xkey` (discovery — they reveal nothing an account member
 couldn't learn by connecting; no token-count collision with principal
-subjects, which always carry more tokens). *Amended at design review before
-any build (2026-07-28, journey 0006): no `v1` token.* Versioning machinery
+subjects, which always carry more tokens). Because user names ride subjects
+as single tokens, the registry refuses names containing `.`, `*`, `>`
+alongside the path characters it already forbade. *Amended at design review
+before any build (2026-07-28, journey 0006): no `v1` token.* Versioning machinery
 before a single consumer exists is speculation (constitution III); the
 wire-contract one-way door is answered when it actually closes — a breaking
 change after consumers freeze the contract gets a new prefix as its escape,
@@ -89,12 +98,13 @@ same property rides NATS's import/export system — an export of the service's
 subject space declaring `account_token_position` forces the importing
 account's public key into that subject token, server-enforced, so the
 principal claim stays trustworthy across account boundaries
-[mechanism-argument]. Recorded as the extension path, not M3 scope: M3
-serves same-account consumers with the name tokens the registry already
-keys by; the first cross-account consumer (M2's node is the candidate)
-triggers the account token's move to the account public key — a
-subject-grammar change that must land before external consumers freeze the
-contract (the roadmap's wire-contract one-way door).
+[mechanism-argument]. Recorded as the extension path, not M3 scope — and
+the grammar is already ready for it: the account token *is* the account
+public key (the registry has keyed identities by it since milestone 1), the
+very value `account_token_position` compares against, so extending across
+accounts is export configuration, not a subject change. *(Corrected during
+the M3 build, journey 0007: the amendment as first written assumed name
+tokens; the code showed otherwise.)*
 
 ## D16 — The sealed envelope
 
@@ -144,6 +154,31 @@ discovery, while the first key's rotation is a silent bucket re-seal walk
 (D13); sharing one keypair across an advertised domain and an at-rest
 domain couples those lifecycles and violates domain separation for no
 saving but one file.
+
+## D18 — Management is admin-gated in the registry
+
+*Decided during the M3 build (2026-07-28, journey 0007).* The socket's trust
+model — whoever owns the socket owns the agent (D8) — retired without a
+successor for the management ops: over NATS, *any* authenticated identity
+can reach its own subject prefix, so "who may manage the vault and declare
+identities" needs its own answer. The decision: **registry rows gain an
+`admin` flag** (additive, default false — existing files decode unchanged).
+Admin gates `keys.*`, `identities.*`, and minting for identities other than
+oneself; `sign.record` stays per-identity act-as (D6) and self-mint stays
+open to any registered identity. The first admin rows are operator-declared
+in the registry file — the same act as provisioning the service's creds,
+needing no service to exist yet, which is what makes the bootstrap
+non-circular.
+
+The alternative — an admin list in the service configuration — was rejected
+as a second policy source: the registry is where who-may-what lives (D2),
+and an identity's adminhood is a fact about the identity, not about one
+deployment's config file [judgment].
+
+**Reversal condition**: if admin turns out to need more than one grain —
+role sets accumulating in code as special cases (observable: a second
+boolean beside `admin` proposed for the same reason) — the flag gives way
+to a declared role model in the registry, as a new D-decision.
 
 ## The vault on KV
 

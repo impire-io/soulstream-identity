@@ -16,12 +16,13 @@ import (
 // identity whose role names it.
 func harness(t *testing.T) (*vault.Vault, *registry.Registry, string, string) {
 	t.Helper()
-	dir := t.TempDir()
-	v, err := vault.Open(filepath.Join(dir, "vault"))
+	firstKP, _ := nkeys.CreateCurveKeys()
+	firstSeed, _ := firstKP.Seed()
+	v, err := vault.New(vault.NewMemStore(), string(firstSeed))
 	if err != nil {
 		t.Fatalf("vault: %v", err)
 	}
-	reg, err := registry.Open(filepath.Join(dir, "registry.json"))
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}

@@ -6,6 +6,18 @@ gate.*
 
 ## Where we are (2026-07-28)
 
+**Milestone 3 — the NATS-native rebuild — shipped 2026-07-28**
+([journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md), design
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), D14–D18):
+the sealed service surface on the caller's own subject prefix, the vault on
+NATS KV with envelope encryption, act-as enforced against the server-proven
+principal, admin-gated management (D18). Gate met [measured]: unauthorized
+act-as refused and logged; wire and store ciphertext-only
+(positive-control-verified); a cross-prefix request refused by the server
+itself, never reaching the service. The milestone-1 socket agent,
+`NATSOption` seam, file keystore, and `sign/nonce` op are deleted. Next in
+the execution order: M4 (auth callout), then M2 (consumers wire in).
+
 **Milestone 1 — the walking skeleton — shipped 2026-07-28**
 ([journey 0001](../04-JOURNEY/0001-genesis-and-the-walking-skeleton.md)):
 vault, registry, agent over a Unix socket, mint-from-scoped-signing-keys, the
@@ -44,20 +56,19 @@ arrive over the NATS surface).
    holds one pooled connection per user with no node-held creds. This
    milestone lives mostly in the consuming repos; here it may add only what
    those consumers prove missing.
-3. **M3 — the NATS-native rebuild.** The agent's contract served over NATS
-   request/reply with xkey-sealed payloads, the caller's NATS identity as
-   the principal (D11/D12) — turning act-as policy (D6) from declared into
-   enforced, audit entries gaining the caller — **and** the vault on its
-   initial backend, NATS KV with xkey envelope encryption at rest (D10).
-   The milestone-1 socket surface, `NATSOption` seam, and file keystore
-   retire in this milestone. Gate: an unauthorized act-as request over NATS
-   is refused and logged, a request body is unreadable to the broker, and
-   the vault operates against KV with only ciphertext ever stored
-   [measured]. Both build gates are met: the first-key story is decided —
-   D13, a `0600` local file beside the service creds
-   ([journey 0004](../04-JOURNEY/0004-first-key-story.md)) — and the design
-   doc is [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)
-   (D14–D17, journey 0005).
+3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
+   [journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md)). The
+   agent's contract served over NATS request/reply with xkey-sealed
+   payloads, the caller's NATS identity as the principal (D11/D12) — act-as
+   (D6) enforced, audit entries naming the caller — and the vault on NATS
+   KV with envelope encryption at rest (D10, D13). Realized the design in
+   [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)
+   (D14–D18); the milestone-1 socket surface, `NATSOption` seam, file
+   keystore, and `sign/nonce` op retired. Gate met [measured] in the e2e
+   proof: unauthorized act-as refused and logged; request bodies ciphertext
+   to an account-privileged observer; the KV store ciphertext-only at rest
+   against a plaintext positive control; a cross-prefix request refused by
+   the server's own permission enforcement.
 4. **M4 — auth callout, the front door.** SoulIdentity as the NATS
    auth-callout issuer with pluggable authn backends (KV of API tokens
    first; Entra/OIDC next), issuing ephemeral JWTs for the client's own key

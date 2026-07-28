@@ -1,10 +1,13 @@
-// Command soulidentity runs and talks to the SoulIdentity agent: an ssh-agent
-// for personas. `serve` is the daemon; every other subcommand is a client of
-// the agent's socket.
+// Command soulidentity runs and talks to the SoulIdentity service: the
+// identity plane of the Soulstream ecosystem, served over NATS
+// (hq/02-DESIGN/nats-surface.md). `serve` is the daemon; every other
+// subcommand is a NATS client of the service's sealed surface, speaking as
+// the principal named by --as.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,29 +18,40 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
+	"github.com/synadia-io/orbit.go/natscontext"
+
 	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/agent"
 	"github.com/impire-io/soulidentity/internal/registry"
+	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
 	"github.com/impire-io/soulidentity/internal/version"
 )
 
-const usage = `soulidentity — an ssh-agent for personas
+const usage = `soulidentity — the identity plane, served over NATS
 
 Usage:
-  soulidentity serve    [--data DIR] [--socket PATH]     run the agent
-  soulidentity status   [--socket PATH]                  probe the agent
-  soulidentity key import --name N --kind K (--seed-file F | --seed-stdin)
-  soulidentity key ls
-  soulidentity identity add --account A --user U [--personas p1,p2] [--role R]
-  soulidentity identity ls
-  soulidentity mint     --account A --user U [--creds]
+  soulidentity serve    [conn] [--registry PATH] [--bucket NAME]     run the service
+  soulidentity keygen                              mint an xkey seed (seed on stdout)
+  soulidentity status   [conn]                     probe the service
+  soulidentity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
+  soulidentity key ls       [conn] --as A/U
+  soulidentity identity add [conn] --as A/U --account A --user U [--personas p1,p2] [--role R] [--admin]
+  soulidentity identity ls  [conn] --as A/U
+  soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
   soulidentity version
 
+Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
+--as is the principal (<account-public-key>/<user>) the connection is
+authenticated as; the server refuses mismatched prefixes (D15).
+Serve reads its xkey seeds from SOULIDENTITY_FIRST_KEY and
+SOULIDENTITY_SURFACE_KEY; the --first-key/--surface-key flags are accepted
+but argv is visible in the process table — prefer the environment (D13).
 Kinds: nats-account-signing-key | nats-user-key | persona-signing-key
-Defaults: data dir <user-config-dir>/soulidentity, socket <data>/agent.sock.
---creds prints a creds file: the seed LEAVES the vault — an explicit custody
-escape for external tools, not the normal path (see hq/02-DESIGN/agent.md D7).
+--creds prints a creds file: the seed LEAVES the vault — the explicit custody
+escape (hq/02-DESIGN/agent.md D7) and the way onto the bypass lane (D12).
 `
 
 func main() {
@@ -54,6 +68,8 @@ func run(args []string, out, errw io.Writer) int {
 	switch cmd {
 	case "serve":
 		err = cmdServe(rest, errw)
+	case "keygen":
+		err = cmdKeygen(out, errw)
 	case "status":
 		err = cmdStatus(rest, out)
 	case "key":
@@ -85,48 +101,179 @@ func defaultDataDir() string {
 	return filepath.Join(dir, "soulidentity")
 }
 
-func socketFlag(fs *flag.FlagSet) *string {
-	return fs.String("socket", client.DefaultSocket(), "agent socket path")
+// connFlags registers the connection flags shared by every NATS-speaking
+// subcommand.
+type connFlags struct {
+	context, url, creds *string
+}
+
+func addConnFlags(fs *flag.FlagSet) connFlags {
+	return connFlags{
+		context: fs.String("context", "", "NATS CLI context name (github.com/synadia-io/orbit.go/natscontext)"),
+		url:     fs.String("url", "", "NATS server URL (default "+nats.DefaultURL+")"),
+		creds:   fs.String("creds-file", "", "creds file for the connection (the bypass lane, D12)"),
+	}
+}
+
+func (c connFlags) connect() (*nats.Conn, error) {
+	if *c.context != "" {
+		nc, _, err := natscontext.Connect(*c.context, nats.Name("soulidentity"))
+		if err != nil {
+			return nil, fmt.Errorf("context %q: %w", *c.context, err)
+		}
+		return nc, nil
+	}
+	url := *c.url
+	if url == "" {
+		url = nats.DefaultURL
+	}
+	opts := []nats.Option{nats.Name("soulidentity")}
+	if *c.creds != "" {
+		opts = append(opts, nats.UserCredentials(*c.creds))
+	}
+	nc, err := nats.Connect(url, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s: %w", url, err)
+	}
+	return nc, nil
+}
+
+// asFlag parses the principal: <account-public-key>/<user>.
+func asFlag(fs *flag.FlagSet) *string {
+	return fs.String("as", "", "principal this connection speaks as: <account-public-key>/<user>")
+}
+
+func parseAs(as string) (account, user string, err error) {
+	account, user, ok := strings.Cut(as, "/")
+	if !ok || account == "" || user == "" {
+		return "", "", errors.New("--as must be <account-public-key>/<user>")
+	}
+	return account, user, nil
+}
+
+func newClient(cf connFlags, as string) (*client.Client, func(), error) {
+	account, user, err := parseAs(as)
+	if err != nil {
+		return nil, nil, err
+	}
+	nc, err := cf.connect()
+	if err != nil {
+		return nil, nil, err
+	}
+	return client.New(nc, account, user), nc.Close, nil
+}
+
+// seedFromFlagOrEnv resolves an xkey seed: flag first (accepted, but argv is
+// world-visible), environment as the documented home (D13).
+func seedFromFlagOrEnv(flagVal, envName string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	if v := os.Getenv(envName); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("no seed: set %s (or --%s)", envName, strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(envName, "SOULIDENTITY_"), "_", "-")))
 }
 
 func cmdServe(args []string, errw io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	data := fs.String("data", defaultDataDir(), "data directory (vault + registry)")
-	socket := fs.String("socket", "", "socket path (default <data>/agent.sock)")
+	cf := addConnFlags(fs)
+	registryPath := fs.String("registry", filepath.Join(defaultDataDir(), "registry.json"), "registry file (declared identities)")
+	bucket := fs.String("bucket", "SOULIDENTITY_VAULT", "KV bucket holding the sealed vault")
+	firstKey := fs.String("first-key", "", "vault first key seed (SX…); prefer SOULIDENTITY_FIRST_KEY")
+	surfaceKey := fs.String("surface-key", "", "surface xkey seed (SX…); prefer SOULIDENTITY_SURFACE_KEY")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *socket == "" {
-		*socket = filepath.Join(*data, "agent.sock")
-	}
-	v, err := vault.Open(filepath.Join(*data, "vault"))
+	firstSeed, err := seedFromFlagOrEnv(*firstKey, "SOULIDENTITY_FIRST_KEY")
 	if err != nil {
 		return err
 	}
-	reg, err := registry.Open(filepath.Join(*data, "registry.json"))
+	surfaceSeed, err := seedFromFlagOrEnv(*surfaceKey, "SOULIDENTITY_SURFACE_KEY")
+	if err != nil {
+		return err
+	}
+
+	nc, err := cf.connect()
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return fmt.Errorf("jetstream: %w", err)
+	}
+	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: *bucket})
+	if err != nil {
+		return fmt.Errorf("kv bucket %s: %w", *bucket, err)
+	}
+	v, err := vault.New(vault.NewKVStore(kv), firstSeed)
+	if err != nil {
+		return err
+	}
+	// Fail fast on a mis-supplied first key: never double-seal a vault.
+	if err := v.Verify(); err != nil {
+		return err
+	}
+	reg, err := registry.Open(*registryPath)
 	if err != nil {
 		return err
 	}
 	log := slog.New(slog.NewTextHandler(errw, nil))
-	a := agent.New(v, reg, log)
+	svc, err := service.New(v, reg, surfaceSeed, log)
+	if err != nil {
+		return err
+	}
+	sub, err := svc.Start(nc)
+	if err != nil {
+		return err
+	}
+	log.Info("service serving", "subjects", service.Prefix+".>", "bucket", *bucket,
+		"registry", *registryPath, "version", version.Version)
+	<-ctx.Done()
+	_ = sub.Drain()
+	return nc.Drain()
+}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	log.Info("agent serving", "socket", *socket, "data", *data, "version", version.Version)
-	return agent.Serve(ctx, *socket, a.Handler())
+func cmdKeygen(out, errw io.Writer) error {
+	kp, err := nkeys.CreateCurveKeys()
+	if err != nil {
+		return err
+	}
+	seed, err := kp.Seed()
+	if err != nil {
+		return err
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		return err
+	}
+	// Seed on stdout (pipe it into the secret store), public half on stderr.
+	fmt.Fprintln(out, string(seed))
+	fmt.Fprintln(errw, "public key:", pub)
+	return nil
 }
 
 func cmdStatus(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	socket := socketFlag(fs)
+	cf := addConnFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	ver, err := client.New(*socket).Status()
+	nc, err := cf.connect()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "agent %s at %s\n", ver, *socket)
+	defer nc.Close()
+	// Status is an open op: no principal needed.
+	ver, err := client.New(nc, "", "").Status()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "service %s\n", ver)
 	return nil
 }
 
@@ -137,7 +284,8 @@ func cmdKey(args []string, out io.Writer) error {
 	switch args[0] {
 	case "import":
 		fs := flag.NewFlagSet("key import", flag.ContinueOnError)
-		socket := socketFlag(fs)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
 		name := fs.String("name", "", "vault name for the key")
 		kind := fs.String("kind", "", "key kind")
 		seedFile := fs.String("seed-file", "", "file holding the seed")
@@ -162,7 +310,12 @@ func cmdKey(args []string, out io.Writer) error {
 		default:
 			return fmt.Errorf("key import needs --seed-file or --seed-stdin (never a flag: seeds do not belong in shell history)")
 		}
-		entry, err := client.New(*socket).ImportKey(*name, *kind, secret)
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		entry, err := c.ImportKey(*name, *kind, secret)
 		if err != nil {
 			return err
 		}
@@ -170,11 +323,17 @@ func cmdKey(args []string, out io.Writer) error {
 		return nil
 	case "ls":
 		fs := flag.NewFlagSet("key ls", flag.ContinueOnError)
-		socket := socketFlag(fs)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		keys, err := client.New(*socket).Keys()
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		keys, err := c.Keys()
 		if err != nil {
 			return err
 		}
@@ -194,38 +353,51 @@ func cmdIdentity(args []string, out io.Writer) error {
 	switch args[0] {
 	case "add":
 		fs := flag.NewFlagSet("identity add", flag.ContinueOnError)
-		socket := socketFlag(fs)
-		account := fs.String("account", "", "NATS account public key (A…)")
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		account := fs.String("account", "", "NATS account public key (A…) of the identity")
 		user := fs.String("user", "", "user name within the account")
 		personas := fs.String("personas", "", "comma-separated personas this identity may act as")
 		role := fs.String("role", "", "vault name of the account signing key that mints for this identity")
+		admin := fs.Bool("admin", false, "declare an admin identity (manages vault and registry)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		id := client.Identity{Account: *account, User: *user, Role: *role}
+		id := client.Identity{Account: *account, User: *user, Role: *role, Admin: *admin}
 		if *personas != "" {
 			for _, p := range strings.Split(*personas, ",") {
 				id.Personas = append(id.Personas, strings.TrimSpace(p))
 			}
 		}
-		if err := client.New(*socket).PutIdentity(id); err != nil {
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		if err := c.PutIdentity(id); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "declared %s/%s\n", id.Account, id.User)
 		return nil
 	case "ls":
 		fs := flag.NewFlagSet("identity ls", flag.ContinueOnError)
-		socket := socketFlag(fs)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		ids, err := client.New(*socket).Identities()
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		ids, err := c.Identities()
 		if err != nil {
 			return err
 		}
 		for _, id := range ids {
-			fmt.Fprintf(out, "%s/%s\tpersonas=%s\trole=%s\n",
-				id.Account, id.User, strings.Join(id.Personas, ","), id.Role)
+			fmt.Fprintf(out, "%s/%s\tpersonas=%s\trole=%s\tadmin=%v\n",
+				id.Account, id.User, strings.Join(id.Personas, ","), id.Role, id.Admin)
 		}
 		return nil
 	default:
@@ -235,23 +407,38 @@ func cmdIdentity(args []string, out io.Writer) error {
 
 func cmdMint(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("mint", flag.ContinueOnError)
-	socket := socketFlag(fs)
-	account := fs.String("account", "", "NATS account public key (A…)")
-	user := fs.String("user", "", "user name within the account")
+	cf := addConnFlags(fs)
+	as := asFlag(fs)
+	account := fs.String("account", "", "target account public key (default: the principal's)")
+	user := fs.String("user", "", "target user (default: the principal)")
 	creds := fs.Bool("creds", false, "ALSO print a creds file — the seed leaves the vault (custody escape)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	c := client.New(*socket)
+	c, done, err := newClient(cf, *as)
+	if err != nil {
+		return err
+	}
+	defer done()
+	tAccount, tUser, err := parseAs(*as)
+	if err != nil {
+		return err
+	}
+	if *account != "" {
+		tAccount = *account
+	}
+	if *user != "" {
+		tUser = *user
+	}
 	if *creds {
-		res, err := c.MintCreds(*account, *user)
+		res, err := c.MintCreds(tAccount, tUser)
 		if err != nil {
 			return err
 		}
 		fmt.Fprint(out, res.Creds)
 		return nil
 	}
-	res, err := c.Mint(*account, *user)
+	res, err := c.Mint(tAccount, tUser)
 	if err != nil {
 		return err
 	}

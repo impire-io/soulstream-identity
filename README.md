@@ -12,14 +12,16 @@ inside NATS with the right identity and permissions, every mint attributable.
 
 The surface is NATS-native — request/reply with xkey-sealed end-to-end
 encryption, the caller authenticated by its own NATS identity — and it is
-the only one. Connections follow a two-lane ladder: bring your own creds
-file (the self-custody bypass — used directly whenever presented,
-SoulIdentity out of the path) or bring an external token and arrive through
-auth callout. What ships today is milestone 1's local socket agent, a
-transitional surface that retires when the NATS-native rebuild lands.
+the only one. Operations live on the caller's own subject prefix
+(`soulidentity.<account>.<user>.<op>`), and the claim is trustworthy because
+the server's publish permissions only let the rightful identity use it.
+Connections follow a two-lane ladder: bring your own creds file (the
+self-custody bypass — used directly whenever presented, SoulIdentity out of
+the path) or bring an external token and arrive through auth callout
+(the next milestone).
 
 The design — the decisions and their reasoning — lives in
-[hq/02-DESIGN/agent.md](hq/02-DESIGN/agent.md). **How this project is run
+[hq/02-DESIGN/](hq/02-DESIGN/README.md). **How this project is run
 lives in [hq/](hq/README.md)** — vision and constitution
 ([hq/00-GENESIS/](hq/00-GENESIS/README.md)), the roadmap
 ([hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md)), and the
@@ -31,35 +33,43 @@ journey log ([hq/04-JOURNEY/](hq/04-JOURNEY/README.md)); agents start at
 ```sh
 go install github.com/impire-io/soulidentity/cmd/soulidentity@latest
 
-soulidentity serve &                            # agent on the default socket
+# Operator, once: mint the two xkeys into your secret store —
+# the vault's first key and the surface key (seed on stdout):
+export SOULIDENTITY_FIRST_KEY=$(soulidentity keygen)
+export SOULIDENTITY_SURFACE_KEY=$(soulidentity keygen)
 
-# Load your NATS account's (scoped) signing key into the vault:
-soulidentity key import --name acme-persona-role \
-  --kind nats-account-signing-key --seed-file ./SA.nk
+# Run the service on its NATS connection (creds file = the bypass lane).
+# The vault lives in a KV bucket, sealed; the registry file declares who
+# exists — including the first admin row:
+soulidentity serve --creds-file ./service.creds --registry ./registry.json &
+
+# As an admin identity, load your account's (scoped) signing key:
+soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
+  --name acme-persona-role --kind nats-account-signing-key --seed-file ./SA.nk
 
 # Register an identity: who it is, which personas it may act as,
 # which role (vault key) mints its credentials:
-soulidentity identity add --account AC...PUBKEY --user daan \
-  --personas daan,smith --role acme-persona-role
+soulidentity identity add --creds-file ./ops.creds --as AC...PUBKEY/ops \
+  --account AC...PUBKEY --user daan --personas daan,smith --role acme-persona-role
 
-# Mint a user JWT (the user key is generated inside the vault and stays there):
-soulidentity mint --account AC...PUBKEY --user daan
+# Mint daan's creds (the explicit custody escape — self-custody onboarding):
+soulidentity mint --creds-file ./ops.creds --as AC...PUBKEY/ops \
+  --account AC...PUBKEY --user daan --creds > daan.creds
 ```
 
-Connecting to NATS from Go, with the nonce signed by the agent — no key file
-anywhere:
+Signing a Soulstream record from Go — the persona key never leaves the vault,
+and the service enforces who may act as which persona:
 
 ```go
-c := client.New(client.DefaultSocket())
-opt, _ := c.NATSOption("AC...PUBKEY", "daan")
-nc, _ := nats.Connect(url, opt)
+nc, _ := nats.Connect(url, nats.UserCredentials("daan.creds"))
+c := client.New(nc, "AC...PUBKEY", "daan")
+sig, _ := c.SignRecord("daan", canonicalBytes)
 ```
 
 ## What it is not
 
 Not a KMS (storage backends are pluggable; NATS KV with xkey envelope
-encryption is the initial backend, the milestone-1 file keystore
-transitional), not an identity
+encryption is the initial backend), not an identity
 provider (external identities are represented, never authenticated by us —
 authn backends plug into callout mode), not an authorization server for your
 realm (NATS enforces transport permissions via scoped signing keys or auth
@@ -69,14 +79,17 @@ custody escape.
 
 ## Status
 
-Milestone 1 — walking skeleton. Local socket agent, file vault, identity
-registry, mint-from-scoped-signing-keys, NATS nonce oracle, proven end to end
-against an embedded NATS server in operator mode. The quick start above
-documents this shipped, transitional surface. See
+Milestone 3 — the NATS-native rebuild. The sealed service surface, the vault
+on NATS KV with envelope encryption at rest, act-as enforced against the
+server-proven caller, and an audit log that names real principals — proven
+end to end against an embedded NATS server in operator mode (unauthorized
+act-as refused, wire and store ciphertext-only, cross-prefix requests
+refused by the server itself). The milestone-1 socket agent, file keystore,
+and nonce oracle are retired. See
 [hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for what
-replaces it (the NATS-native rebuild — service surface plus KV vault, socket
-retiring — then auth callout as the front door with claims-derived
-authorization, attestation issuance, sealing keys).
+comes next (auth callout as the front door with claims-derived
+authorization, then consumers wiring in; attestation issuance, sealing
+keys).
 
 ## License
 

@@ -85,6 +85,24 @@ func TestValidateRefusesBadShapes(t *testing.T) {
 	if err := r.Put(Identity{Account: accountPub(t), User: "with space"}); err == nil {
 		t.Fatal("user with whitespace accepted")
 	}
+	// User names ride NATS subjects: separators and wildcards are refused.
+	for _, bad := range []string{"a.b", "a*", "a>", "a/b"} {
+		if err := r.Put(Identity{Account: accountPub(t), User: bad}); err == nil {
+			t.Fatalf("user %q accepted", bad)
+		}
+	}
+}
+
+func TestAdminFlagRoundTrips(t *testing.T) {
+	r := newRegistry(t)
+	acc := accountPub(t)
+	if err := r.Put(Identity{Account: acc, User: "ops", Admin: true}); err != nil {
+		t.Fatalf("Put admin: %v", err)
+	}
+	got, ok, err := r.Get(acc, "ops")
+	if err != nil || !ok || !got.Admin {
+		t.Fatalf("admin lost in roundtrip: ok=%v err=%v %+v", ok, err, got)
+	}
 }
 
 func TestStrictDecodeFailsLoudly(t *testing.T) {

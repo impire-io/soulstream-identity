@@ -3,7 +3,7 @@
 *The identity plane of the Soulstream ecosystem: an identity vault, a signing
 oracle, and a NATS credential minter, delivered as a NATS service. Decisions
 below are numbered D1–D13; each records its reasoning so it can be re-argued
-honestly later. The NATS-surface design continues the numbering (D14–D17) in
+honestly later. The NATS-surface design continues the numbering (D14–D18) in
 [`nats-surface.md`](nats-surface.md). Milestone status lives in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
@@ -81,9 +81,10 @@ client seam built in milestone 1 is superseded with the socket.
 
 ## D2 — Identities are declared or verifiably claimed, never guessed
 
-An identity is registered as `{account, user, allowed personas, role}` —
-keyed by **(account, user)**, never by bare name, so multi-account vaults
-stay unambiguous. Which account a user belongs to is decided at registration
+An identity is registered as `{account, user, allowed personas, role,
+admin}` (the admin flag arrived with the NATS surface — D18) — keyed by
+**(account, user)**, never by bare name, so multi-account vaults stay
+unambiguous. Which account a user belongs to is decided at registration
 (minting *is* the assignment; the minted JWT's `issuer_account` carries it),
 not detected.
 
@@ -388,6 +389,8 @@ Out of scope for milestone 1 (and shipped without them): the NATS service
 surface (D11), auth callout, attestation issuance, sealing keys, the KV
 storage backend — each has a decision above naming its direction. After the
 same-day re-centering (journeys 0002–0003), the skeleton's socket surface,
-`NATSOption` client seam, and file keystore are transitional — they work as
-shipped and retire with the NATS-native rebuild (M3); the vault, registry,
-and mint internals carry forward unchanged.
+`NATSOption` client seam, and file keystore were transitional; the
+NATS-native rebuild (M3, journey 0007) retired all three along with the
+`sign/nonce` op — the registry and mint internals carried forward, the
+vault's logic carried forward onto the sealed KV backend
+([`nats-surface.md`](nats-surface.md)).

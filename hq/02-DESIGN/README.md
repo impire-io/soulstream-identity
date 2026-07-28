@@ -9,7 +9,7 @@ the system as it is.
 | Document | What it covers |
 |---|---|
 | [`agent.md`](agent.md) | The agent: vault, registry, oracle, mint — decisions D1–D13 and the milestone-1 shape |
-| [`nats-surface.md`](nats-surface.md) | The NATS surface (M3): subject space, server-enforced principal, sealed envelope, KV vault — decisions D14–D17 |
+| [`nats-surface.md`](nats-surface.md) | The NATS surface (M3): subject space, server-enforced principal, sealed envelope, KV vault, admin gate — decisions D14–D18 |
 
 Future documents arrive by research graduation (see
 [`../01-RESEARCH/README.md`](../01-RESEARCH/README.md)) or design propagation

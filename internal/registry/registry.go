@@ -31,6 +31,11 @@ type Identity struct {
 	// Role names the vault key (an account signing key, ideally scoped) that
 	// mints this identity's user JWTs.
 	Role string `json:"role,omitempty"`
+	// Admin marks an operator identity: it may manage the vault and registry
+	// over the service surface and mint for identities other than itself. The
+	// first admin rows are operator-declared in the registry file — this field
+	// is policy, declared like everything else (hq/02-DESIGN/agent.md D2).
+	Admin bool `json:"admin,omitempty"`
 }
 
 // Validate checks the shape: a real account public key, a sane user name.
@@ -41,8 +46,10 @@ func (id Identity) Validate() error {
 	if id.User == "" || len(id.User) > 128 {
 		return errors.New("registry: user is required (max 128 chars)")
 	}
-	if strings.ContainsAny(id.User, " \t\r\n/") {
-		return fmt.Errorf("registry: user %q must not contain whitespace or '/'", id.User)
+	// User names become NATS subject tokens (hq/02-DESIGN/nats-surface.md D14),
+	// so the token separators and wildcards are forbidden alongside path chars.
+	if strings.ContainsAny(id.User, " \t\r\n/.*>") {
+		return fmt.Errorf("registry: user %q must not contain whitespace, '/', '.', '*' or '>'", id.User)
 	}
 	for _, p := range id.Personas {
 		if strings.TrimSpace(p) == "" {

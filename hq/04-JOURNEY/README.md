@@ -17,23 +17,24 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
-**M3 is fully unblocked — design written, reviewed, and amended**
-([episode 0005](0005-the-nats-surface-design.md) then
-[episode 0006](0006-design-review-amendments.md); design doc
-[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)): the
-NATS-surface design lands D14–D17 on the re-centered direction, and the
-operator's same-day review amended it before any build. The load-bearing
-decision, taught back and confirmed: D15 — operations live at
-`soulidentity.<account>.<user>.<op>` and the caller's claim is proven by
-the server's publish-permission enforcement, no second verifier
-[mechanism-argument] — which is what turns act-as (D6) from declared into
-enforced, extending cross-account later via `account_token_position`
-exports. The subject space is unversioned (D14 amended), the sealed
-envelope has an honest replay analysis (D16), and both xkey seeds arrive
-as deployment-supplied environment variables — the service writes no key
-material to disk (D13/D17 amended). Wire bodies are unchanged from
-milestone 1. Next: build M3 against the five acceptance criteria in the
-design doc.
+**Milestone 3 — the NATS-native rebuild — is shipped**
+([episode 0007](0007-m3-the-nats-native-rebuild.md); design
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), D14–D18):
+the service answers over sealed NATS request/reply on the caller's own
+subject prefix — the principal proven by the server's publish-permission
+enforcement (D15, via the scoped-key template
+`soulidentity.{{account-subject()}}.{{name()}}.>`) — and the vault seals
+into NATS KV with both xkeys deployment-supplied. Act-as (D6) is enforced
+and audited against real principals; management is admin-gated in the
+registry (D18, the socket trust model's successor). All four gate criteria
+measured in the e2e proof: unauthorized act-as refused and logged, wire and
+store ciphertext-only (positive-control-verified), cross-prefix requests
+refused by the server itself. The socket agent, `NATSOption`, file
+keystore, and `sign/nonce` are deleted. Next in the execution order: M4
+(auth callout, the front door), then M2 (consumers wire in). Design and
+review that preceded the build:
+[episode 0005](0005-the-nats-surface-design.md),
+[episode 0006](0006-design-review-amendments.md).
 
 **The first-key story is decided — M3's research gate is open**
 ([episode 0004](0004-first-key-story.md), D13): the unwrapping xkey for the
@@ -86,3 +87,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0004 | [The first-key story: a local file, named honestly](0004-first-key-story.md) |
 | 0005 | [The NATS-surface design: the principal is the subject](0005-the-nats-surface-design.md) |
 | 0006 | [Design review: seeds from the environment, no v1, D15 taught back](0006-design-review-amendments.md) |
+| 0007 | [M3: the NATS-native rebuild ships](0007-m3-the-nats-native-rebuild.md) |

@@ -1,36 +1,36 @@
-// Package client talks to a SoulIdentity agent over its Unix socket and wires
-// the agent's oracles into consumers — most importantly nats.go's credential
-// callbacks, so a NATS connection authenticates with a key that never leaves
-// the vault (hq/02-DESIGN/agent.md D1).
+// Package client talks to a SoulIdentity service over NATS request/reply with
+// xkey-sealed payloads (hq/02-DESIGN/nats-surface.md D16). The caller's NATS
+// connection is the authentication: requests ride the caller's own subject
+// prefix, which the server only lets the rightful identity publish to (D15).
 //
-// The types here mirror the agent's JSON wire contract; this package is the
+// The types here mirror the service's JSON wire contract; this package is the
 // contract's canonical consumer-side definition.
 package client
 
 import (
-	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
 )
 
-// Key is a vault entry as the agent shows it: never the secret.
+// Prefix roots the service's subject space (unversioned — D14).
+const Prefix = "soulidentity"
+
+// Key is a vault entry as the service shows it: never the secret.
 type Key struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	PublicKey string `json:"public_key"`
 }
 
-// Vault key kinds (the agent's vocabulary).
+// Vault key kinds (the service's vocabulary).
 const (
 	KindNATSAccountSigningKey = "nats-account-signing-key"
 	KindNATSUserKey           = "nats-user-key"
@@ -43,6 +43,7 @@ type Identity struct {
 	User     string   `json:"user"`
 	Personas []string `json:"personas,omitempty"`
 	Role     string   `json:"role,omitempty"`
+	Admin    bool     `json:"admin,omitempty"`
 }
 
 // MintResult is a minted user JWT; Creds is present only when the custody
@@ -53,177 +54,223 @@ type MintResult struct {
 	Creds         string `json:"creds,omitempty"`
 }
 
-// DefaultSocket is the agent's default socket path
-// (<user-config-dir>/soulidentity/agent.sock).
-func DefaultSocket() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return filepath.Join("soulidentity", "agent.sock")
-	}
-	return filepath.Join(dir, "soulidentity", "agent.sock")
-}
-
-// Client is a SoulIdentity agent client. The zero value is not usable; New.
+// Client is a SoulIdentity service client bound to the principal its
+// connection authenticates as. The zero value is not usable; New.
 type Client struct {
-	socket string
-	hc     *http.Client
+	nc      *nats.Conn
+	account string
+	user    string
+	timeout time.Duration
+
+	mu         sync.Mutex
+	servicePub string // pinned via WithServiceXKey or learned by discovery
 }
 
-// New returns a client for the agent at socket ("" means DefaultSocket).
-func New(socket string) *Client {
-	if socket == "" {
-		socket = DefaultSocket()
+// Option configures a Client.
+type Option func(*Client)
+
+// WithServiceXKey pins the service's surface public key out of band instead
+// of trusting discovery over the broker (hq/02-DESIGN/nats-surface.md D16).
+func WithServiceXKey(pub string) Option {
+	return func(c *Client) { c.servicePub = pub }
+}
+
+// WithTimeout overrides the per-request timeout (default 10s).
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = d }
+}
+
+// New returns a client speaking as (account, user) — the same identity nc is
+// authenticated as; the server refuses the subject prefix otherwise.
+func New(nc *nats.Conn, account, user string, opts ...Option) *Client {
+	c := &Client{nc: nc, account: account, user: user, timeout: 10 * time.Second}
+	for _, opt := range opts {
+		opt(c)
 	}
-	return &Client{
-		socket: socket,
-		hc: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					var d net.Dialer
-					return d.DialContext(ctx, "unix", socket)
-				},
-			},
-			Timeout: 10 * time.Second,
-		},
-	}
+	return c
+}
+
+// envelope is the sealed transport shape (D16); encoding/json carries Data as
+// base64.
+type envelope struct {
+	XKey string `json:"xkey"`
+	Data []byte `json:"data"`
 }
 
 type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// call performs one JSON round-trip. The host "agent" is a placeholder — the
-// transport dials the socket regardless.
-func (c *Client) call(method, path string, in, out any) error {
-	var body *bytes.Reader
-	if in != nil {
-		data, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("soulidentity: encode request: %w", err)
-		}
-		body = bytes.NewReader(data)
-	} else {
-		body = bytes.NewReader(nil)
+// serviceXKey returns the service's surface public key, discovering it once.
+func (c *Client) serviceXKey() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.servicePub != "" {
+		return c.servicePub, nil
 	}
-	req, err := http.NewRequest(method, "http://agent"+path, body)
+	msg, err := c.nc.Request(Prefix+".xkey", nil, c.timeout)
 	if err != nil {
-		return fmt.Errorf("soulidentity: build request: %w", err)
+		return "", fmt.Errorf("soulidentity: service discovery: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.hc.Do(req)
+	var x struct {
+		XKey string `json:"xkey"`
+	}
+	if err := json.Unmarshal(msg.Data, &x); err != nil || x.XKey == "" {
+		return "", errors.New("soulidentity: service discovery returned no xkey")
+	}
+	c.servicePub = x.XKey
+	return c.servicePub, nil
+}
+
+// call performs one sealed round-trip on the client's own subject prefix.
+func (c *Client) call(op string, in, out any) error {
+	servicePub, err := c.serviceXKey()
 	if err != nil {
-		return fmt.Errorf("soulidentity: agent at %s unreachable: %w", c.socket, err)
+		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
+	eph, err := nkeys.CreateCurveKeys()
+	if err != nil {
+		return fmt.Errorf("soulidentity: ephemeral key: %w", err)
+	}
+	ephPub, err := eph.PublicKey()
+	if err != nil {
+		return fmt.Errorf("soulidentity: ephemeral key: %w", err)
+	}
+	plain, err := json.Marshal(in)
+	if err != nil {
+		return fmt.Errorf("soulidentity: encode request: %w", err)
+	}
+	sealed, err := eph.Seal(plain, servicePub)
+	if err != nil {
+		return fmt.Errorf("soulidentity: seal request: %w", err)
+	}
+	req, err := json.Marshal(envelope{XKey: ephPub, Data: sealed})
+	if err != nil {
+		return fmt.Errorf("soulidentity: encode envelope: %w", err)
+	}
+
+	subject := strings.Join([]string{Prefix, c.account, c.user, op}, ".")
+	msg, err := c.nc.Request(subject, req, c.timeout)
+	if err != nil {
+		return fmt.Errorf("soulidentity: %s: %w", op, err)
+	}
+
+	var env envelope
+	if uerr := json.Unmarshal(msg.Data, &env); uerr != nil || len(env.Data) == 0 {
+		// Not an envelope: a plaintext refusal from before the secure channel.
 		var er errorResponse
-		if json.NewDecoder(resp.Body).Decode(&er) == nil && er.Error != "" {
+		if json.Unmarshal(msg.Data, &er) == nil && er.Error != "" {
 			return fmt.Errorf("soulidentity: %s", er.Error)
 		}
-		return fmt.Errorf("soulidentity: agent returned %s", resp.Status)
+		return fmt.Errorf("soulidentity: %s: unreadable reply", op)
+	}
+	// Replies are opened against the pinned/discovered service key — a reply
+	// sealed by anything else does not open.
+	opened, err := eph.Open(env.Data, servicePub)
+	if err != nil {
+		return fmt.Errorf("soulidentity: %s: reply cannot be unsealed: %w", op, err)
+	}
+	var er errorResponse
+	if json.Unmarshal(opened, &er) == nil && er.Error != "" {
+		return fmt.Errorf("soulidentity: %s", er.Error)
 	}
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.Unmarshal(opened, out); err != nil {
 		return fmt.Errorf("soulidentity: decode response: %w", err)
 	}
 	return nil
 }
 
-// Status returns the agent's version, doubling as a liveness probe.
+// Status returns the service's version, doubling as a liveness probe. It is
+// one of the two open (unsealed) ops.
 func (c *Client) Status() (string, error) {
+	msg, err := c.nc.Request(Prefix+".status", nil, c.timeout)
+	if err != nil {
+		return "", fmt.Errorf("soulidentity: status: %w", err)
+	}
 	var out struct {
 		Version string `json:"version"`
 	}
-	if err := c.call(http.MethodGet, "/v1/status", nil, &out); err != nil {
-		return "", err
+	if err := json.Unmarshal(msg.Data, &out); err != nil {
+		return "", fmt.Errorf("soulidentity: decode status: %w", err)
 	}
 	return out.Version, nil
 }
 
 // ImportKey stores a secret in the vault (write-only; the response carries the
-// public key). Existing names are refused.
+// public key). Existing names are refused. Admin identities only.
 func (c *Client) ImportKey(name, kind, secret string) (Key, error) {
 	var out Key
-	err := c.call(http.MethodPost, "/v1/keys", map[string]string{
+	err := c.call("keys.import", map[string]string{
 		"name": name, "kind": kind, "secret": secret,
 	}, &out)
 	return out, err
 }
 
-// Keys lists the vault (public form).
+// Keys lists the vault (public form). Admin identities only.
 func (c *Client) Keys() ([]Key, error) {
 	var out struct {
 		Keys []Key `json:"keys"`
 	}
-	err := c.call(http.MethodGet, "/v1/keys", nil, &out)
+	err := c.call("keys.list", struct{}{}, &out)
 	return out.Keys, err
 }
 
-// PutIdentity declares an identity (create-or-replace).
+// PutIdentity declares an identity (create-or-replace). Admin identities only.
 func (c *Client) PutIdentity(id Identity) error {
-	return c.call(http.MethodPost, "/v1/identities", id, nil)
+	return c.call("identities.put", id, nil)
 }
 
-// Identities lists the registry.
+// Identities lists the registry. Admin identities only.
 func (c *Client) Identities() ([]Identity, error) {
 	var out struct {
 		Identities []Identity `json:"identities"`
 	}
-	err := c.call(http.MethodGet, "/v1/identities", nil, &out)
+	err := c.call("identities.list", struct{}{}, &out)
 	return out.Identities, err
 }
 
-// SignNonce signs a NATS connection nonce with the named vault key, returning
-// raw signature bytes — the shape nats.go's signature callback wants.
-func (c *Client) SignNonce(key string, nonce []byte) ([]byte, error) {
-	var out struct {
-		Sig string `json:"sig"`
-	}
-	if err := c.call(http.MethodPost, "/v1/sign/nonce", map[string]string{
-		"key": key, "nonce": base64.StdEncoding.EncodeToString(nonce),
-	}, &out); err != nil {
-		return nil, err
-	}
-	sig, err := base64.StdEncoding.DecodeString(out.Sig)
-	if err != nil {
-		return nil, fmt.Errorf("soulidentity: agent returned invalid signature: %w", err)
-	}
-	return sig, nil
+// PersonaKeyName is the vault name of a persona's signing key — the binding
+// act-as is enforced against (hq/02-DESIGN/nats-surface.md).
+func PersonaKeyName(persona string) string {
+	return "persona/" + persona
 }
 
-// SignRecord signs canonical record bytes with the named persona key,
-// returning the base64 signature string Soulstream-Sig carries.
-func (c *Client) SignRecord(key string, canonical []byte) (string, error) {
+// SignRecord signs canonical record bytes as persona, returning the base64
+// signature string Soulstream-Sig carries. The service enforces that this
+// client's identity may act as the persona (D6).
+func (c *Client) SignRecord(persona string, canonical []byte) (string, error) {
 	var out struct {
 		Sig string `json:"sig"`
 	}
-	err := c.call(http.MethodPost, "/v1/sign/record", map[string]string{
-		"key": key, "canonical": base64.StdEncoding.EncodeToString(canonical),
+	err := c.call("sign.record", map[string]string{
+		"key": PersonaKeyName(persona), "canonical": base64.StdEncoding.EncodeToString(canonical),
 	}, &out)
 	return out.Sig, err
 }
 
-// Mint issues a user JWT for the registered identity. The user key lives in
-// the vault; connecting uses NATSOption, no creds file.
+// Mint issues a user JWT for the registered identity. Minting for an identity
+// other than the client's own requires admin.
 func (c *Client) Mint(account, user string) (MintResult, error) {
 	var out MintResult
-	err := c.call(http.MethodPost, "/v1/mint", map[string]any{
+	err := c.call("mint", map[string]any{
 		"account": account, "user": user,
 	}, &out)
 	return out, err
 }
 
 // MintCreds is the explicit custody escape (hq/02-DESIGN/agent.md D7): mint plus a creds
-// file whose seed leaves the vault. For external tools only.
+// file whose seed leaves the vault. For self-custody onboarding and external
+// tools; the service logs it loudly.
 func (c *Client) MintCreds(account, user string) (MintResult, error) {
 	var out MintResult
-	err := c.call(http.MethodPost, "/v1/mint", map[string]any{
+	err := c.call("mint", map[string]any{
 		"account": account, "user": user, "export_creds": true,
 	}, &out)
 	if err == nil && out.Creds == "" {
-		return out, errors.New("soulidentity: agent did not return creds")
+		return out, errors.New("soulidentity: service did not return creds")
 	}
 	return out, err
 }
@@ -231,24 +278,4 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 // UserKeyName is the vault name of an identity's minted user key.
 func UserKeyName(account, user string) string {
 	return "user/" + account + "/" + user
-}
-
-// NATSOption returns a nats.Option authenticating as (account, user) entirely
-// through the agent: the JWT callback mints (idempotently reusing the vaulted
-// user key), the signature callback signs the server's nonce in the vault.
-// No key material ever reaches this process.
-func (c *Client) NATSOption(account, user string) nats.Option {
-	key := UserKeyName(account, user)
-	return nats.UserJWT(
-		func() (string, error) {
-			res, err := c.Mint(account, user)
-			if err != nil {
-				return "", err
-			}
-			return res.JWT, nil
-		},
-		func(nonce []byte) ([]byte, error) {
-			return c.SignNonce(key, nonce)
-		},
-	)
 }
