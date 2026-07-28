@@ -17,6 +17,19 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
+**The first-key story is decided — M3's research gate is open**
+([episode 0004](0004-first-key-story.md), D13): the unwrapping xkey for the
+KV backend's envelope encryption lives in a `0600` local file beside the
+service's creds, minted on the service host at first start and never leaving
+it — named honestly as a plaintext root secret in the same trust class as
+the creds file, with the envelope's real gain being that broker disks,
+replicas, and backups never hold plaintext seeds. All three pre-registered
+bars passed [measured]: the sealed round-trip survives broker+service
+restart unattended, the store holds ciphertext only
+(positive-control-verified), and the from-nothing bootstrap is two operator
+acts plus one automatic service act. What still precedes M3's build is its
+design doc.
+
 **The mission was re-centered, twice in one day**
 ([episode 0002](0002-the-identity-plane-re-centering.md) then
 [episode 0003](0003-nats-only-and-the-connection-ladder.md); constitution
@@ -51,3 +64,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0001 | [Genesis: the design thread and the walking skeleton](0001-genesis-and-the-walking-skeleton.md) |
 | 0002 | [The identity-plane re-centering](0002-the-identity-plane-re-centering.md) |
 | 0003 | [NATS-only and the connection ladder](0003-nats-only-and-the-connection-ladder.md) |
+| 0004 | [The first-key story: a local file, named honestly](0004-first-key-story.md) |

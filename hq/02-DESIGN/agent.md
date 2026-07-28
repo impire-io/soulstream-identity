@@ -2,7 +2,7 @@
 
 *The identity plane of the Soulstream ecosystem: an identity vault, a signing
 oracle, and a NATS credential minter, delivered as a NATS service. Decisions
-below are numbered D1–D12; each records its reasoning so it can be re-argued
+below are numbered D1–D13; each records its reasoning so it can be re-argued
 honestly later. Milestone status lives in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
@@ -217,8 +217,8 @@ process; the milestone-1 file keystore (0600 seed files, matching
 NATS-native rebuild (M3). Stated honestly: envelope encryption relocates the
 root secret, it does not eliminate it — the unwrapping xkey seed and the
 service's own NATS creds are the only local secrets, and the first-key story
-is a research question gating the backend. OS keychains and a Vault transit
-engine remain later options. SoulIdentity wraps storage, it does not
+was researched and decided as D13 (journey 0004). OS keychains and a Vault
+transit engine remain later options. SoulIdentity wraps storage, it does not
 reimplement it.
 
 ## D11 — The service surface is NATS-native
@@ -310,6 +310,41 @@ returns as a new D-decision. If claims-derived mapping ends up re-creating
 the registry row by row (observable: per-user mapping exceptions
 accumulating in configuration), claims-derived authorization demotes to a
 bootstrap convenience and the registry returns as the sole policy source.
+
+## D13 — The first key: a local file, named honestly
+
+*Decided 2026-07-28 by research graduation (`first-key-story`, journey
+0004).* The unwrapping xkey for the KV backend's envelope encryption (D10)
+lives in a **local file, mode `0600`, beside the service's own creds file**
+— the raw `SX…` curve seed, minted by the service itself on first start and
+refused overwrite thereafter. Stated without euphemism: the root secret is a
+plaintext file on the service host, readable by the service user and root —
+exactly the trust class of `service.creds` next to it. What the envelope
+buys is not local-host protection; it is that the KV bucket — broker disks,
+replicas, backups, anything account-credentialed — never holds a plaintext
+seed [measured, journey 0004].
+
+The bootstrap, from nothing, is two operator acts and one automatic service
+act [measured]:
+
+1. **Operator:** provision the realm — the service's account and its creds
+   file, the one artifact that crosses a machine boundary (`nsc` or the
+   mint escape, D7).
+2. **Operator:** start the deployment (server reachable, JetStream on).
+3. **Service, first start:** mint the xkey into its file, create the KV
+   bucket. The first key never leaves the host it was minted on.
+
+Alternatives are recorded in the graduation table (journey 0004): OS
+keychains fail headless deployments, passphrase-derivation fails unattended
+restart or degrades into this file, and a KMS moves the same root secret one
+indirection away at the cost of an external system — those remain later
+backends on D10's ladder, re-opened per deployment class if one cannot hold
+a `0600` file. Rotation is a named operation — mint a new xkey, walk the
+bucket re-sealing — even while M3 ships without automating it.
+
+**Reversal condition** (from the graduation): a deployment class blocked on
+read-only or secretless hosts (recorded as an issue) re-opens the
+keychain/KMS rows as that class's home.
 
 ## Milestone 1 — the walking skeleton
 

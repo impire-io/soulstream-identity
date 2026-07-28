@@ -53,8 +53,9 @@ arrive over the NATS surface).
    retire in this milestone. Gate: an unauthorized act-as request over NATS
    is refused and logged, a request body is unreadable to the broker, and
    the vault operates against KV with only ciphertext ever stored
-   [measured]. Design doc precedes build; the first-key story is decided by
-   research before it.
+   [measured]. Design doc precedes build; the first-key story is decided —
+   D13, a `0600` local file beside the service creds
+   ([journey 0004](../04-JOURNEY/0004-first-key-story.md)).
 4. **M4 — auth callout, the front door.** SoulIdentity as the NATS
    auth-callout issuer with pluggable authn backends (KV of API tokens
    first; Entra/OIDC next), issuing ephemeral JWTs for the client's own key
@@ -86,11 +87,10 @@ arrive over the NATS surface).
   reaches the server so callout can fire — sentinel creds, bearer JWT, or
   token-in-password — proven end to end. The other half of D11's reversal
   condition.
-- **The first-key story** (gates M3): where the unwrapping xkey for the KV
-  backend's envelope encryption lives (local file, OS keychain), how a fresh
-  deployment obtains it, and how the service's own bypass creds are
-  provisioned. Envelope encryption relocates the root secret; this research
-  names its new home honestly.
+- ~~**The first-key story** (gated M3)~~ — answered 2026-07-28
+  ([journey 0004](../04-JOURNEY/0004-first-key-story.md), D13): a `0600`
+  local file on the service host, minted at first start; bootstrap is two
+  operator acts + one automatic service act [measured].
 - **The claims-mapping shape** (gates M4): which token issuers are trusted,
   which claim names the team, how a team maps to a role and allowed
   personas — the declared configuration behind claims-derived authorization

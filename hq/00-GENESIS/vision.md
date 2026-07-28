@@ -75,7 +75,7 @@ already owns their identity is forced through SoulIdentity.
 
 ## Where it is pointed
 
-The design decisions (D1–D12) live in
+The design decisions (D1–D13) live in
 [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md); the sequencing in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md):
 
