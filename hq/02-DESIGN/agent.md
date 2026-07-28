@@ -2,7 +2,7 @@
 
 *The identity plane of the Soulstream ecosystem: an identity vault, a signing
 oracle, and a NATS credential minter, delivered as a NATS service. Decisions
-below are numbered D1–D11; each records its reasoning so it can be re-argued
+below are numbered D1–D12; each records its reasoning so it can be re-argued
 honestly later. Milestone status lives in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
@@ -17,12 +17,14 @@ MCP node, the NATS server itself in callout mode) authenticate, name the
 identity they act for, and receive signatures and minted credentials. The
 seeds never cross the API.
 
-The primary surface is NATS-native (D11): request/reply with xkey-sealed
-payloads, the caller authenticated by its own NATS identity. The shipped
-walking skeleton speaks the same contract over a local Unix socket where
-filesystem permissions are the authentication — that socket remains the
-bootstrap and laptop rung (D8), because the first NATS connection cannot be
-signed through a service reached over that same connection.
+The surface is NATS-native and it is the only one (D11): request/reply with
+xkey-sealed payloads, the caller authenticated by its own NATS identity.
+There is no socket. The pre-NATS moment is answered by the connection ladder
+(D12), not a local surface: a client presenting a creds file in its
+connection options connects directly — the server verifies it natively and
+SoulIdentity is not in the path — while a client presenting an external
+token arrives through auth callout. The shipped walking skeleton's socket
+surface is transitional and retires when the NATS surface lands (M3).
 
 ## Why it exists
 
@@ -66,19 +68,38 @@ trail.
 *Amended 2026-07-28 (journey 0002): demoted from "the native seam" to the
 local one.* The nonce oracle only works over a non-NATS transport — a client
 cannot reach a NATS-hosted oracle to sign the nonce of the very connection it
-is establishing [mechanism-argument]. On the primary NATS surface (D11) the
-connection story is durable minted creds or auth callout (D4 rung 3); live
-nonce signing remains the seam for the local socket rung and for record
-signing, which happens on an already-established connection.
+is establishing [mechanism-argument].
 
-## D2 — Identities are declared, never inferred
+*Amended again the same day (journey 0003): with the socket dropped (D12),
+the nonce oracle leaves the connection story entirely.* Connections are
+creds-bypass or callout — nothing signs nonces through SoulIdentity anymore.
+What survives of D1 is the layer above: record signing ("sign these
+canonical bytes as persona X") stays a signing-oracle request, served over
+the NATS surface on an already-established connection. The `NATSOption`
+client seam built in milestone 1 is superseded with the socket.
+
+## D2 — Identities are declared or verifiably claimed, never guessed
 
 An identity is registered as `{account, user, allowed personas, role}` —
 keyed by **(account, user)**, never by bare name, so multi-account vaults
 stay unambiguous. Which account a user belongs to is decided at registration
 (minting *is* the assignment; the minted JWT's `issuer_account` carries it),
-not detected. The only inference-shaped problem — does this signing key
-actually belong to that account? — is not ours to enforce:
+not detected.
+
+*Amended 2026-07-28 (journey 0003): the registry is one source of the
+act-as/mint decision, not the only one.* The second source is a **validated
+claim** carried by the connection credential itself — a JWT passed in the
+token connection option, its issuer on an allow-list, signature and audience
+checked — from which the team is deduced: which role, which permissions,
+which personas. This runs naturally in callout mode, where the credential is
+in hand at the moment of decision. It is not inference: nothing is guessed;
+an identity is either *declared* (a registry row) or *verifiably claimed* (a
+validated token), and the mapping rules — which issuers are trusted, which
+claim names the team, which team maps to which role — are themselves
+declared configuration. The trust delegated to a token issuer is delegated
+deliberately, per backend. The one inference-shaped problem that remains —
+does this signing key actually belong to that account? — is still not ours
+to enforce:
 
 ## D3 — Binding verification is diagnostic, optional, never a gate
 
@@ -107,6 +128,16 @@ Deployments climb a ladder; the identity registry is the same at every rung:
    external identities get represented inside NATS, and the callout protocol
    is already a NATS service speaking xkey-encrypted payloads, i.e. the same
    shape as the primary surface (D11).
+
+*Amended again the same day (journey 0003): the ladder collapses into the
+two-lane road of D12.* A client with a creds file connects directly —
+server-verified, SoulIdentity out of the path (rung 1's shared-node-creds
+floor disappears: a node no longer needs shared creds, it passes each user's
+token through callout). A client with an external token goes through callout,
+authorized by registry or claims (D2). Mint mode stops being a *connection*
+mode: minting durable JWTs remains a service function whose output — an
+exported creds file, through the loud D7 escape — is exactly how an operator
+obtains their bypass credentials.
 
 A policy KV consulted *instead of* NATS enforcement would be a second source
 of truth; the same KV as the *backend of the callout issuer* is the native
@@ -137,25 +168,34 @@ agent (the operator's).
 
 ## D7 — Custody is honest, and export is explicit
 
-Minted user keys are generated inside the vault and stay there; connecting
-uses the JWT plus the nonce oracle, so the standard flow never materialises
-a creds file. For tools that need one (`nats` CLI), export exists as an
-**explicit custody escape** (`export_creds`), named as such in the API — the
-operator chooses to move a secret out of custody; it never happens as a side
-effect.
+Minted user keys are generated inside the vault and stay there; export
+exists as an **explicit custody escape** (`export_creds`), named as such in
+the API — the operator chooses to move a secret out of custody; it never
+happens as a side effect.
 
-## D8 — Local mode's principal is the OS user; the socket is the bootstrap rung
+*Amended 2026-07-28 (journey 0003):* the escape is now also the front door
+of the bypass lane (D12) — an exported creds file is how an operator obtains
+self-custody credentials, so export is a legitimate end state for an
+identity's *owner*, still explicit and loudly logged. The custody property
+Constitution I protects sharpens rather than weakens: *represented*
+identities — external users, agents on shared infrastructure — never touch
+key material at any point; in callout the client's key is its own and only
+an ephemeral JWT is issued for it. (The original "the standard flow never
+materialises a creds file" claim described the nonce-oracle flow, which left
+the connection story with D1.)
 
-Milestone 1 authenticates the way ssh-agent does: socket mode 0600, vault
-dir 0700 — whoever owns the socket owns the agent. Claimed identities on the
-local socket are honour-system within that boundary and every operation is
-still logged. *Amended 2026-07-28 (journey 0002):* real per-caller
-authentication arrives with the NATS surface (D11), where the caller's own
-NATS identity is the principal — not with a TCP listener and a parallel
-token scheme, which is dropped. The API shape already carries the identity
-parameter so nothing changes but the checking. The socket does not
-disappear: it is the bootstrap and laptop rung, the one surface reachable
-before any NATS connection exists (D1).
+## D8 — Local mode's principal was the OS user (superseded)
+
+*Superseded 2026-07-28 (journey 0003, D12): there is no socket and no local
+mode; the principal is always the caller's NATS identity.* Recorded for
+history: milestone 1 authenticated the way ssh-agent does — socket mode
+0600, vault dir 0700, whoever owns the socket owns the agent, claimed
+identities honour-system within that boundary, every operation logged. The
+2026-07-28 re-centering first demoted the socket to a bootstrap rung
+(journey 0002), then dropped it hours later when the creds-file bypass
+proved the better answer to the pre-NATS moment (D12). The API shape carries
+the identity parameter throughout, so the NATS surface changes the checking,
+not the contract.
 
 ## D9 — Sealed topics: unwrap once, no decrypt oracle
 
@@ -168,16 +208,18 @@ oracle is a non-goal; nobody should later design one by symmetry.
 ## D10 — Storage backends are pluggable; the vault is not a KMS
 
 The Soulstream-specific value is the persona model, act-as policy, and
-minting logic. Crypto storage is commodity: milestone 1 is a file keystore
-(0600 seed files, matching `soulstream key init` conventions); the backend
-interface is the extension point. *Amended 2026-07-28 (journey 0002): the
-named next backend is NATS KV with xkey envelope encryption at rest* — seeds
-stored as ciphertext in a KV bucket, unwrapped only inside the vault
-process. Stated honestly: envelope encryption relocates the root secret (the
-unwrapping xkey seed stays a local file or moves to an OS keychain), it does
-not eliminate it; the first-key story is a research question gating that
-backend. OS keychains and a Vault transit engine remain later options.
-SoulIdentity wraps storage, it does not reimplement it.
+minting logic. Crypto storage is commodity: the backend interface is the
+extension point. *Amended 2026-07-28 (journeys 0002–0003): NATS KV with xkey
+envelope encryption at rest is the vault's **initial** backend* — seeds
+stored only as ciphertext in a KV bucket, unwrapped inside the vault
+process; the milestone-1 file keystore (0600 seed files, matching
+`soulstream key init` conventions) is transitional and retires with the
+NATS-native rebuild (M3). Stated honestly: envelope encryption relocates the
+root secret, it does not eliminate it — the unwrapping xkey seed and the
+service's own NATS creds are the only local secrets, and the first-key story
+is a research question gating the backend. OS keychains and a Vault transit
+engine remain later options. SoulIdentity wraps storage, it does not
+reimplement it.
 
 ## D11 — The service surface is NATS-native
 
@@ -219,6 +261,56 @@ identity cannot pass an end-to-end proof [measured], the NATS-native surface
 demotes to an optional mode and the local socket returns to the primary
 surface.
 
+*Amended 2026-07-28 (journey 0003): the surface is NATS-only.* The
+bootstrap answer above ("the local socket serves the pre-NATS moment")
+lasted hours: the creds-file bypass is the better answer (D12), and the
+socket is dropped rather than demoted. The reversal condition stands, with
+D12 adding its own: a consumer class that fits neither lane brings a
+pre-connection local surface back as a new decision.
+
+## D12 — The connection ladder: creds bypass or callout, nothing between
+
+*Decided 2026-07-28 (journey 0003), superseding the socket-as-bootstrap-rung
+answer recorded hours earlier (journey 0002).* How anything connects to NATS
+in a SoulIdentity deployment is exactly one of two lanes:
+
+- **Creds bypass.** A client that presents a creds file (or nkey seed) in
+  its connection options connects directly; the server verifies it natively
+  and SoulIdentity is not in the path. This is the self-custody lane:
+  operators, break-glass, the laptop case, and SoulIdentity's own service
+  connection. Creds are obtained through the loud export escape (D7) or
+  external tooling (`nsc`).
+- **Callout.** A client that presents an external credential — a JWT in the
+  token connection option, an API token — is authenticated by SoulIdentity
+  as the auth-callout issuer: the credential is validated, the team deduced
+  (registry-declared or claims-derived — D2), and an ephemeral user JWT is
+  issued for the client's own key.
+
+Auth-callout configuration is where the line is drawn: the server's callout
+config names the users exempt from callout (the bypass lane, verified
+natively), and every other connection in scope goes through the issuer —
+this is the native NATS callout shape, not machinery we build
+[mechanism-argument].
+
+Argued against at full strength before deciding. First: the bypass lane is
+raw key possession — the thing the genesis warns about. Answer: possession
+by the identity's *owner* is self-custody, not a custody leak; what
+Constitution I protects is that *represented* identities never touch key
+material, and in the callout lane they never do. Second: callout on the
+connect path couples represented users' connection availability to
+SoulIdentity's availability [mechanism-argument]. Answer: accepted as the
+cost of representation; the bypass lane is unaffected, and operators always
+have the break-glass path.
+
+**Reversal condition** (written at decision time): if a consumer class
+emerges that can neither hold a creds file nor present a
+callout-validatable credential (observable: a consumer integration blocked
+at connection, recorded as an issue), a pre-connection local surface
+returns as a new D-decision. If claims-derived mapping ends up re-creating
+the registry row by row (observable: per-user mapping exceptions
+accumulating in configuration), claims-derived authorization demotes to a
+bootstrap convenience and the registry returns as the sole policy source.
+
 ## Milestone 1 — the walking skeleton
 
 - `internal/vault` — file-backed keystore: NATS nkey seeds (account signing
@@ -240,7 +332,9 @@ surface.
   the vault [measured, in the test suite].
 
 Out of scope for milestone 1 (and shipped without them): the NATS service
-surface (D11), auth callout, attestation issuance, sealing keys, non-file
-storage backends — each has a decision above naming its direction. The
-walking skeleton's socket surface is the bootstrap rung (D8), not a
-deprecated artifact.
+surface (D11), auth callout, attestation issuance, sealing keys, the KV
+storage backend — each has a decision above naming its direction. After the
+same-day re-centering (journeys 0002–0003), the skeleton's socket surface,
+`NATSOption` client seam, and file keystore are transitional — they work as
+shipped and retire with the NATS-native rebuild (M3); the vault, registry,
+and mint internals carry forward unchanged.

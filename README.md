@@ -10,11 +10,13 @@ minted NATS credentials; the seeds never cross the API. Identities arriving
 from the outside world — Entra/OIDC principals, API tokens — get represented
 inside NATS with the right identity and permissions, every mint attributable.
 
-The primary surface is NATS-native: request/reply with xkey-sealed end-to-end
-encryption, the caller authenticated by its own NATS identity. What ships
-today is the bootstrap rung of that ladder — a local socket agent, ssh-agent
-style — which also serves the laptop case and the moment before any NATS
-connection exists.
+The surface is NATS-native — request/reply with xkey-sealed end-to-end
+encryption, the caller authenticated by its own NATS identity — and it is
+the only one. Connections follow a two-lane ladder: bring your own creds
+file (the self-custody bypass — used directly whenever presented,
+SoulIdentity out of the path) or bring an external token and arrive through
+auth callout. What ships today is milestone 1's local socket agent, a
+transitional surface that retires when the NATS-native rebuild lands.
 
 The design — the decisions and their reasoning — lives in
 [hq/02-DESIGN/agent.md](hq/02-DESIGN/agent.md). **How this project is run
@@ -55,8 +57,9 @@ nc, _ := nats.Connect(url, opt)
 
 ## What it is not
 
-Not a KMS (storage backends are pluggable; the file keystore is the first,
-NATS KV with xkey envelope encryption is the named next), not an identity
+Not a KMS (storage backends are pluggable; NATS KV with xkey envelope
+encryption is the initial backend, the milestone-1 file keystore
+transitional), not an identity
 provider (external identities are represented, never authenticated by us —
 authn backends plug into callout mode), not an authorization server for your
 realm (NATS enforces transport permissions via scoped signing keys or auth
@@ -68,11 +71,12 @@ custody escape.
 
 Milestone 1 — walking skeleton. Local socket agent, file vault, identity
 registry, mint-from-scoped-signing-keys, NATS nonce oracle, proven end to end
-against an embedded NATS server in operator mode. See
-[hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for the
-ladder this grows along (the NATS service surface, auth callout as the front
-door for external identities, KV-backed vault storage, attestation issuance,
-sealing keys).
+against an embedded NATS server in operator mode. The quick start above
+documents this shipped, transitional surface. See
+[hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for what
+replaces it (the NATS-native rebuild — service surface plus KV vault, socket
+retiring — then auth callout as the front door with claims-derived
+authorization, attestation issuance, sealing keys).
 
 ## License
 

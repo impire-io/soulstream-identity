@@ -33,8 +33,9 @@ The NATS server enforces; SoulIdentity decides only what is genuinely its own.
   connection. SoulIdentity MUST NOT build a parallel enforcement path that
   duplicates what the server already checks.
 - SoulIdentity's own policy surface is exactly: which identity exists, which
-  personas it may act as, which role mints for it. Act-as policy is ours;
-  pub/sub permissions are not.
+  personas it may act as, which role mints for it — whether declared in the
+  registry or derived from validated claims in the presented credential
+  (D2). Act-as policy is ours; pub/sub permissions are not.
 - Validations the server will repeat (e.g. signing-key ↔ account binding) are
   diagnostics — warn-level conveniences, never gates. A mis-bound key fails
   closed at the server; that is the design, not a gap.
@@ -101,19 +102,22 @@ change, a scope call, or a public claim.
 
 - **Language**: Go, matching the ecosystem; official NATS libraries only
   (`nkeys`, `jwt/v2`, `nats.go`, embedded `nats-server` for tests).
-- **Secrets at rest**: 0600 files under 0700 directories in the file backend;
-  the named next backend is NATS KV with xkey envelope encryption at rest.
-  Further backends arrive through the storage seam, never by widening file
-  handling — and encryption at rest relocates the root secret (the unwrapping
-  xkey), it does not eliminate it; the first-key story is decided by research
-  before the backend lands.
-- **Transport**: NATS is the primary transport — request/reply with
-  xkey-sealed payloads (end-to-end encrypted), the caller authenticated by
-  its own NATS identity. The local Unix socket remains the bootstrap and
-  laptop mode (filesystem permissions are the authentication): it exists
-  because the first NATS connection cannot be signed through a service
-  reached over that same connection. A plain TCP listener with a parallel
-  token scheme is off the table — caller authentication comes from NATS.
+- **Secrets at rest**: the vault's initial backend is NATS KV with xkey
+  envelope encryption at rest — only ciphertext is ever stored; the
+  milestone-1 file keystore (0600 files under 0700 directories) is
+  transitional and retires with the NATS-native rebuild. Encryption at rest
+  relocates the root secret, it does not eliminate it: the unwrapping xkey
+  and the service's own NATS creds are the only local secrets, and the
+  first-key story is decided by research before the backend lands. Further
+  backends arrive through the storage seam.
+- **Transport**: NATS is the only transport — request/reply with xkey-sealed
+  payloads (end-to-end encrypted), the caller authenticated by its own NATS
+  identity. There is no socket and no TCP listener. The pre-connection
+  moment belongs to the connection ladder, not to a local surface: a client
+  presenting a creds file connects to NATS directly and bypasses
+  SoulIdentity (self-custody); a client presenting an external token arrives
+  through auth callout. Auth-callout configuration is where that line is
+  drawn and enforced.
 - **Dependencies**: an identity agent is judged by its audit surface — keep
   the dependency tree small enough to read.
 
@@ -140,9 +144,21 @@ change, a scope call, or a public claim.
   principle; MINOR — a new principle or section, or materially expanded
   guidance; PATCH — clarifications.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-28
+**Version**: 1.2.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-28
 
 *Amendment history:*
+- *1.2.0 (2026-07-28)* — the connection ladder (journey
+  [0003](../04-JOURNEY/0003-nats-only-and-the-connection-ladder.md)):
+  NATS becomes the *only* transport — the Unix socket is dropped entirely
+  (superseding 1.1.0's bootstrap-mode role hours after it was written). The
+  pre-connection moment is answered by the ladder instead: a presented creds
+  file bypasses SoulIdentity (self-custody, server-verified natively); an
+  external token arrives through auth callout, with the line drawn in
+  callout config (D12). NATS KV + xkey envelope is promoted from named-next
+  to the vault's *initial* backend (the file keystore is transitional), and
+  Principle II's policy-surface bullet is clarified to admit validated
+  claims in the presented credential as a policy source beside the declared
+  registry (D2 amended). Principles I–IV otherwise unchanged (MINOR).
 - *1.1.0 (2026-07-28)* — the identity-plane re-centering (journey
   [0002](../04-JOURNEY/0002-the-identity-plane-re-centering.md)): mission
   redefined in `vision.md` from "a local ssh-agent for personas" to the

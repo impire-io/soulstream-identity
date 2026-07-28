@@ -1,9 +1,9 @@
 # SoulIdentity Vision
 
-*Re-centered 2026-07-28 (constitution 1.1.0, journey 0002): the mission moved
-from "a local ssh-agent for personas" to the identity plane below. The custody
-property is unchanged; what changed is what the project is for and where it
-lives.*
+*Re-centered 2026-07-28 (constitution 1.1.0 → 1.2.0, journeys 0002–0003): the
+mission moved from "a local ssh-agent for personas" to the identity plane
+below — NATS-only, no socket. The custody property is unchanged; what changed
+is what the project is for and where it lives.*
 
 ## What SoulIdentity is
 
@@ -24,6 +24,12 @@ audited operation: the registry says who may be represented by whom, and every
 mint and signature is attributable and logged. The NATS server remains the
 verifier of record for everything a minted credential claims.
 
+Not every connection goes through it. A client that presents its own creds
+file in its connection options connects to NATS directly — the self-custody
+bypass for operators — and SoulIdentity is simply not in that path.
+Representation is for identities that do not carry NATS credentials of their
+own; auth-callout configuration is where that line is drawn.
+
 The custody analogy survives from genesis: like an ssh-agent, SoulIdentity
 signs instead of handing out keys. A compromised consumer can *request*
 signatures while inside — every request logged and attributable — but can
@@ -34,15 +40,20 @@ never exfiltrate a key.
 The "what is needed for a working soulidentity" list stays short. A working
 soulidentity is exactly:
 
-1. A vault: named seeds behind a pluggable storage backend, encrypted at rest
-   (files today; NATS KV with xkey envelope encryption is the named next
-   backend).
-2. A registry: declared identities — who exists, which personas they may act
-   as, which role mints for them.
+1. A vault: named seeds behind a pluggable storage backend, encrypted at
+   rest — **NATS KV with xkey envelope encryption is the initial backend**
+   (the milestone-1 file keystore is transitional; the unwrapping xkey and
+   the service's own creds are the only local secrets).
+2. A policy surface: who may act as which persona, which role mints — fed by
+   two sources: the **declared registry**, or **validated claims** carried by
+   the connection credential (a JWT in the token option). Declared or
+   verifiably claimed, never guessed.
 3. A service surface answering sign and mint requests — **on NATS, with
-   xkey-sealed payloads, as the primary surface**; a local socket remains for
-   the bootstrap and laptop case, because the first NATS connection cannot be
-   signed through a service reached over that same connection.
+   xkey-sealed payloads, and nothing else: there is no socket**. The
+   pre-NATS moment is answered by the connection ladder, not a local
+   surface: bring your own creds file (the self-custody bypass, used
+   directly whenever presented) or bring an external token and arrive
+   through auth callout.
 4. The NATS server enforcing everything else.
 
 Nothing else. No PKI, no session state, no permission engine — the NATS
@@ -57,31 +68,31 @@ Humans and agents that need to *be someone* inside NATS: operators of
 Soulstream realms and personas, teams whose AI clients arrive through a shared
 node, and outside-world identities — Entra, OIDC, API tokens — that must be
 represented inside the system with the right identity and permissions. The
-deployment ladder — local socket for one operator on a laptop → the NATS
-service surface for shared infrastructure → auth callout as the front door
-for external identities — climbs with the deployment, on one identity
-registry. Nobody is forced up a rung the simple case doesn't need.
+connection ladder is two rungs wide: bring your own creds file (self-custody
+— operators, the laptop case, break-glass) or bring an external token and be
+represented through auth callout. One policy surface serves both; nobody who
+already owns their identity is forced through SoulIdentity.
 
 ## Where it is pointed
 
-The design decisions (D1–D11) live in
+The design decisions (D1–D12) live in
 [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md); the sequencing in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md):
 
-- **The NATS service surface** — the vault, registry, and mint reached over
-  xkey-sealed request/reply, the caller authenticated by its NATS identity.
-  Act-as policy becomes enforced rather than declared.
+- **The NATS-native rebuild** — the vault, policy surface, and mint reached
+  over xkey-sealed request/reply, the caller authenticated by its NATS
+  identity, and the vault on its initial backend (NATS KV, xkey envelope at
+  rest). The milestone-1 socket surface and file keystore retire with it.
 - **Auth callout** — the front door for external identities: SoulIdentity as
   the NATS auth-callout issuer, validating Entra/OIDC/API-token users against
-  pluggable backends and issuing ephemeral credentials the server enforces.
-- **KV-backed vault storage** — seeds in NATS KV, xkey envelope encryption at
-  rest, through the D10 storage seam.
+  pluggable backends — registry-declared or claims-derived — and issuing
+  ephemeral credentials the server enforces. Callout config is also where the
+  creds-file bypass is drawn: a presented creds file is verified natively by
+  the server, SoulIdentity out of the path.
 - **Attestation issuance** — the operator's key lives here, so Soulstream's
   countersigned `operated_by` tokens are naturally issued here.
 - **Sealing keys** — held and used to unwrap epoch keys once; never a
   per-message decrypt oracle.
-- **The local socket** — shipped first as the walking skeleton; stays as the
-  bootstrap and laptop rung, not the destination.
 
 ## What we refuse to become
 
@@ -97,9 +108,11 @@ The design decisions (D1–D11) live in
   (Entra/OIDC, LDAP, a KV of API tokens) plug into callout mode; we implement
   none of them ourselves.
 - **A required component for local sessions.** Soulstream works without
-  SoulIdentity — local sessions with local key files remain first-class.
-  SoulIdentity is what makes *shared* infrastructure and *external*
-  identities honest, not a new dependency for the laptop case.
+  SoulIdentity — a creds file in hand connects directly (the bypass is
+  first-class, not a workaround), and local sessions with local key files
+  remain legitimate. SoulIdentity is what makes *shared* infrastructure and
+  *external* identities honest, not a new dependency for whoever already
+  owns their identity.
 - **A silent secret conduit.** A seed leaves the vault through exactly one
   door — explicit credential export — and that door is named, logged, and
   loud. Any design where a secret moves as a side effect is wrong.
@@ -109,8 +122,9 @@ The design decisions (D1–D11) live in
 Load-bearing decisions carry numbered entries in the design doc with their
 reasoning and, where directional, their reversal conditions — a future
 reversal is a clean, anticipated turn instead of drift. This re-centering is
-itself such a turn: journey 0002 records the argument both ways and the
-condition under which the NATS-native surface demotes again. Claims carry
+itself such a turn — twice in one day: journeys 0002 and 0003 record the
+arguments both ways and the conditions under which the NATS-native surface
+demotes again. Claims carry
 evidence classes, and only `[measured]` closes a debate. The full discipline
 lives in [`constitution.md`](constitution.md) and
 [`how-we-work.md`](how-we-work.md).

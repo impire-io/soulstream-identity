@@ -2,9 +2,10 @@
 
 The identity plane of the Soulstream ecosystem: the representation of
 identity for humans and agents — identity vault, signing oracle, NATS
-credential minting — pointed at a NATS-native service surface with
-xkey-sealed E2E request/reply (the shipped socket agent is the bootstrap
-rung). Module `github.com/impire-io/soulidentity`, Go 1.26.
+credential minting — as a NATS-only service with xkey-sealed E2E
+request/reply. Connections are creds-file bypass or auth callout; the
+shipped socket agent is transitional until the NATS-native rebuild (M3).
+Module `github.com/impire-io/soulidentity`, Go 1.26.
 
 **How this project is run lives in `hq/` — read [`AGENTS.md`](AGENTS.md)
 first** (orientation order + the non-negotiables), then hold decisions against
