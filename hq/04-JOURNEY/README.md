@@ -17,6 +17,18 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
+**M4 research is under way — the sentinel-credential flow is decided**
+([episode 0008](0008-sentinel-credential-flow.md); design
+[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), D19–D21):
+an external-identity client holds the URL and its token, nothing else —
+`default_sentinel` assigns the (bearer, deny-all, public-by-design)
+sentinel server-side, callout fires with the token, and the issuer mints a
+scoped user JWT for the **server-assigned** ephemeral key using the vault's
+existing role keys. All bars [measured]; refusals and issuer-down fail
+closed; D12's "client's own key" wording corrected. Still gating M4: the
+claims-mapping shape (research not yet opened) and the NGS capabilities
+answer (needs the real Synadia account).
+
 **Milestone 3 — the NATS-native rebuild — is shipped**
 ([episode 0007](0007-m3-the-nats-native-rebuild.md); design
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), D14–D18):
@@ -88,3 +100,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0005 | [The NATS-surface design: the principal is the subject](0005-the-nats-surface-design.md) |
 | 0006 | [Design review: seeds from the environment, no v1, D15 taught back](0006-design-review-amendments.md) |
 | 0007 | [M3: the NATS-native rebuild ships](0007-m3-the-nats-native-rebuild.md) |
+| 0008 | [The sentinel-credential flow: URL + token is enough](0008-sentinel-credential-flow.md) |

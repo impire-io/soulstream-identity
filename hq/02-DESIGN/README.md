@@ -10,6 +10,7 @@ the system as it is.
 |---|---|
 | [`agent.md`](agent.md) | The agent: vault, registry, oracle, mint — decisions D1–D13 and the milestone-1 shape |
 | [`nats-surface.md`](nats-surface.md) | The NATS surface (M3): subject space, server-enforced principal, sealed envelope, KV vault, admin gate — decisions D14–D18 |
+| [`auth-callout.md`](auth-callout.md) | Auth callout (M4): sentinel connection contract, issuer-as-mint, AUTH topology — decisions D19–D21 (claims mapping pending) |
 
 Future documents arrive by research graduation (see
 [`../01-RESEARCH/README.md`](../01-RESEARCH/README.md)) or design propagation

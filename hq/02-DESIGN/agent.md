@@ -268,7 +268,10 @@ bootstrap answer above ("the local socket serves the pre-NATS moment")
 lasted hours: the creds-file bypass is the better answer (D12), and the
 socket is dropped rather than demoted. The reversal condition stands, with
 D12 adding its own: a consumer class that fits neither lane brings a
-pre-connection local surface back as a new decision.
+pre-connection local surface back as a new decision. *The reversal
+condition's sentinel half was resolved in D11's favor the same day
+(journey 0008): sentinel onboarding of an external identity passed the
+end-to-end proof [measured]; the NGS half remains open.*
 
 ## D12 — The connection ladder: creds bypass or callout, nothing between
 
@@ -286,7 +289,10 @@ in a SoulIdentity deployment is exactly one of two lanes:
   token connection option, an API token — is authenticated by SoulIdentity
   as the auth-callout issuer: the credential is validated, the team deduced
   (registry-declared or claims-derived — D2), and an ephemeral user JWT is
-  issued for the client's own key.
+  issued. *Amended 2026-07-28 (journey 0008): the JWT is issued for the
+  **server-assigned ephemeral user key** carried in the callout request —
+  the client owns no key at all in this lane; "the client's own key" as
+  originally written was an assumption the protocol refuted [measured].*
 
 Auth-callout configuration is where the line is drawn: the server's callout
 config names the users exempt from callout (the bypass lane, verified

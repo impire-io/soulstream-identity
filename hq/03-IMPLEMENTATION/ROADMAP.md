@@ -77,8 +77,10 @@ arrive over the NATS surface).
    connection authenticated by an external credential, with server-enforced
    permissions and the external identity attributable in the audit log, and
    a creds-file connection verified natively with SoulIdentity out of the
-   path [measured], against self-hosted NATS. Needs research first on the
-   NGS side, the sentinel-credential flow, and the claims-mapping shape
+   path [measured], against self-hosted NATS. The sentinel-credential flow
+   is decided (D19–D21,
+   [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)); still
+   needed before build: the claims-mapping shape and the NGS answer
    (below).
 5. **M5 — attestation issuance.** Soulstream `operated_by` attestation tokens
    issued from the vault (D6's static half). Gated on demand from the
@@ -95,11 +97,14 @@ arrive over the NATS surface).
   configurable? Verify against the real account before either mode is
   promised on NGS — a `/research-start ngs-capabilities` topic when M2/M4
   planning begins. This is also half of D11's reversal condition.
-- **The sentinel-credential flow** (gates M4): the exact bootstrap by which a
-  client carrying only an external credential (Entra/OIDC token, API token)
-  reaches the server so callout can fire — sentinel creds, bearer JWT, or
-  token-in-password — proven end to end. The other half of D11's reversal
-  condition.
+- ~~**The sentinel-credential flow** (gated M4)~~ — answered 2026-07-28
+  ([journey 0008](../04-JOURNEY/0008-sentinel-credential-flow.md), D19–D21
+  in [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)): the
+  client holds URL + external token only (`default_sentinel`), or a public
+  bearer deny-all sentinel creds file besides; the issued JWT is for the
+  server-assigned ephemeral key, minted by the vault's role keys;
+  everything fails closed [measured]. D11's reversal condition is half
+  resolved; the NGS half remains.
 - ~~**The first-key story** (gated M3)~~ — answered 2026-07-28
   ([journey 0004](../04-JOURNEY/0004-first-key-story.md), D13): a `0600`
   local file on the service host, minted at first start; bootstrap is two
