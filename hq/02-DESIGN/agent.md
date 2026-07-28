@@ -3,7 +3,8 @@
 *The identity plane of the Soulstream ecosystem: an identity vault, a signing
 oracle, and a NATS credential minter, delivered as a NATS service. Decisions
 below are numbered D1–D13; each records its reasoning so it can be re-argued
-honestly later. Milestone status lives in
+honestly later. The NATS-surface design continues the numbering (D14–D17) in
+[`nats-surface.md`](nats-surface.md). Milestone status lives in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## What it is

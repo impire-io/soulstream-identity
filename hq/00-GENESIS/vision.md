@@ -75,8 +75,8 @@ already owns their identity is forced through SoulIdentity.
 
 ## Where it is pointed
 
-The design decisions (D1–D13) live in
-[`../02-DESIGN/agent.md`](../02-DESIGN/agent.md); the sequencing in
+The design decisions live in [`../02-DESIGN/`](../02-DESIGN/README.md); the
+sequencing in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md):
 
 - **The NATS-native rebuild** — the vault, policy surface, and mint reached

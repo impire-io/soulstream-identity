@@ -17,6 +17,19 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
+**M3 is fully unblocked — both its gates are met**
+([episode 0005](0005-the-nats-surface-design.md), design doc
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)): the
+NATS-surface design lands D14–D17 on the re-centered direction. The
+load-bearing decision is D15 — operations live at
+`soulidentity.v1.<account>.<user>.<op>` and the caller's claim is proven by
+the server's publish-permission enforcement, no second verifier
+[mechanism-argument] — which is what turns act-as (D6) from declared into
+enforced. D14 versions the subject space, D16 fixes the sealed envelope
+with an honest replay analysis, D17 separates the surface xkey from the
+first key. Wire bodies are unchanged from milestone 1. Next: build M3
+against the five acceptance criteria in the design doc.
+
 **The first-key story is decided — M3's research gate is open**
 ([episode 0004](0004-first-key-story.md), D13): the unwrapping xkey for the
 KV backend's envelope encryption lives in a `0600` local file beside the
@@ -65,3 +78,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0002 | [The identity-plane re-centering](0002-the-identity-plane-re-centering.md) |
 | 0003 | [NATS-only and the connection ladder](0003-nats-only-and-the-connection-ladder.md) |
 | 0004 | [The first-key story: a local file, named honestly](0004-first-key-story.md) |
+| 0005 | [The NATS-surface design: the principal is the subject](0005-the-nats-surface-design.md) |

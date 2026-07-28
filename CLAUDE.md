@@ -11,7 +11,8 @@ Module `github.com/impire-io/soulidentity`, Go 1.26.
 first** (orientation order + the non-negotiables), then hold decisions against
 `hq/00-GENESIS/`. Where things stand: `hq/04-JOURNEY/README.md`. The plan:
 `hq/03-IMPLEMENTATION/ROADMAP.md`. The design with its D-numbered decisions
-(cited from code comments): `hq/02-DESIGN/agent.md`.
+(cited from code comments): `hq/02-DESIGN/` (D1–D13 in `agent.md`, D14–D17
+in `nats-surface.md`).
 
 Conventions:
 

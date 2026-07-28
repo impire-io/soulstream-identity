@@ -53,9 +53,11 @@ arrive over the NATS surface).
    retire in this milestone. Gate: an unauthorized act-as request over NATS
    is refused and logged, a request body is unreadable to the broker, and
    the vault operates against KV with only ciphertext ever stored
-   [measured]. Design doc precedes build; the first-key story is decided —
+   [measured]. Both build gates are met: the first-key story is decided —
    D13, a `0600` local file beside the service creds
-   ([journey 0004](../04-JOURNEY/0004-first-key-story.md)).
+   ([journey 0004](../04-JOURNEY/0004-first-key-story.md)) — and the design
+   doc is [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)
+   (D14–D17, journey 0005).
 4. **M4 — auth callout, the front door.** SoulIdentity as the NATS
    auth-callout issuer with pluggable authn backends (KV of API tokens
    first; Entra/OIDC next), issuing ephemeral JWTs for the client's own key

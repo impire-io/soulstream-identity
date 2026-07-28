@@ -16,8 +16,9 @@ non-negotiables.
    lifecycle, the journey duty). Decisions are held against these.
 2. `hq/04-JOURNEY/README.md` — where things stand + the episode index.
 3. `hq/03-IMPLEMENTATION/ROADMAP.md` — the milestones and their gates.
-4. `hq/02-DESIGN/agent.md` — the design and its numbered decisions (D1–D13);
-   code comments cite these D-numbers.
+4. `hq/02-DESIGN/` — the design docs and their numbered decisions (D1–D13 in
+   `agent.md`, D14–D17 in `nats-surface.md`); code comments cite these
+   D-numbers.
 
 ## Non-negotiables (constitution articles, in brief)
 
