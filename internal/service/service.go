@@ -24,8 +24,46 @@ import (
 	"github.com/impire-io/soulidentity/internal/version"
 )
 
-// Prefix roots the subject space. Unversioned by decision (D14).
-const Prefix = "soulidentity"
+// Segment is the service's fixed token in the subject space. The full root
+// is <prefix>.<Segment> where the prefix is the deployment's shared
+// ecosystem namespace, empty by default (D14 as amended, journey 0011) —
+// fixed per service so ecosystem components can share one prefix without
+// colliding.
+const Segment = "soulidentity"
+
+// SubjectRoot computes the subject root for a deployment prefix ("" means
+// the bare service segment). The account token sits at position
+// len(prefix tokens)+2 (1-based) — the position an export's
+// account_token_position declares for cross-account imports.
+func SubjectRoot(prefix string) string {
+	if prefix == "" {
+		return Segment
+	}
+	return prefix + "." + Segment
+}
+
+// ValidatePrefix enforces the prefix grammar: dot-separated tokens of
+// [A-Za-z0-9_-]+ — no wildcards, no spaces, no '$' (subject tokens, chosen
+// by the deployment, shared verbatim by every consumer).
+func ValidatePrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	for _, tok := range strings.Split(prefix, ".") {
+		if tok == "" {
+			return fmt.Errorf("service: prefix %q has an empty token", prefix)
+		}
+		for _, r := range tok {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+				r == '_', r == '-':
+			default:
+				return fmt.Errorf("service: prefix %q: token %q may only contain [A-Za-z0-9_-]", prefix, tok)
+			}
+		}
+	}
+	return nil
+}
 
 // PersonaKeyPrefix is the vault-name convention binding a registry persona to
 // its signing key: persona <p> signs with vault key "persona/<p>". Act-as
@@ -49,6 +87,9 @@ type Service struct {
 	tokens      callout.Store
 	authKeyName string
 	authAccount string
+
+	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
+	root string
 }
 
 // Option configures a Service.
@@ -62,6 +103,16 @@ func WithCallout(store callout.Store, authKeyName, authAccount string) Option {
 		s.tokens = store
 		s.authKeyName = authKeyName
 		s.authAccount = authAccount
+	}
+}
+
+// WithPrefix namespaces the subject space under the deployment's shared
+// ecosystem prefix (D14 as amended, journey 0011). Every consumer must be
+// configured with the same prefix — a mismatch is silent timeouts, which is
+// why the service logs its root at startup.
+func WithPrefix(prefix string) Option {
+	return func(s *Service) {
+		s.root = SubjectRoot(prefix)
 	}
 }
 
@@ -79,16 +130,21 @@ func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Log
 	if err != nil {
 		return nil, fmt.Errorf("service: surface key public half: %w", err)
 	}
-	s := &Service{vault: v, reg: r, surface: kp, surfacePub: pub, log: log}
+	s := &Service{vault: v, reg: r, surface: kp, surfacePub: pub, log: log, root: Segment}
 	for _, opt := range opts {
 		opt(s)
 	}
 	return s, nil
 }
 
+// Root returns the service's full subject root.
+func (s *Service) Root() string {
+	return s.root
+}
+
 // Start subscribes the service to its subject space on nc.
 func (s *Service) Start(nc *nats.Conn) (*nats.Subscription, error) {
-	sub, err := nc.Subscribe(Prefix+".>", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(s.root+".>", func(msg *nats.Msg) {
 		reply := s.respond(msg.Subject, msg.Data)
 		if msg.Reply != "" {
 			_ = msg.Respond(reply)
@@ -162,13 +218,14 @@ type errorResponse struct {
 // respond computes the full reply bytes for one request — the whole surface,
 // NATS-free so it unit-tests without a server.
 func (s *Service) respond(subject string, data []byte) []byte {
-	tokens := strings.Split(subject, ".")
-	if len(tokens) < 2 || tokens[0] != Prefix {
+	rest, ok := strings.CutPrefix(subject, s.root+".")
+	if !ok {
 		return marshal(errorResponse{Error: "service: unknown subject"})
 	}
+	tokens := strings.Split(rest, ".")
 	// The two open ops answer in plaintext (D14): public material only.
-	if len(tokens) == 2 {
-		switch tokens[1] {
+	if len(tokens) == 1 {
+		switch tokens[0] {
 		case "status":
 			return marshal(statusResponse{Version: version.Version})
 		case "xkey":
@@ -176,10 +233,10 @@ func (s *Service) respond(subject string, data []byte) []byte {
 		}
 		return marshal(errorResponse{Error: "service: unknown subject"})
 	}
-	if len(tokens) < 4 {
+	if len(tokens) < 3 {
 		return marshal(errorResponse{Error: "service: unknown subject"})
 	}
-	account, user, op := tokens[1], tokens[2], strings.Join(tokens[3:], ".")
+	account, user, op := tokens[0], tokens[1], strings.Join(tokens[2:], ".")
 
 	// Before a secure channel exists, errors are plaintext and content-free.
 	var env envelope

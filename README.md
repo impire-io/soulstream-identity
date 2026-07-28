@@ -13,8 +13,10 @@ inside NATS with the right identity and permissions, every mint attributable.
 The surface is NATS-native — request/reply with xkey-sealed end-to-end
 encryption, the caller authenticated by its own NATS identity — and it is
 the only one. Operations live on the caller's own subject prefix
-(`soulidentity.<account>.<user>.<op>`), and the claim is trustworthy because
-the server's publish permissions only let the rightful identity use it.
+(`[<prefix>.]soulidentity.<account>.<user>.<op>`, the optional prefix being
+the ecosystem-wide namespace shared by every soulstream component), and the
+claim is trustworthy because the server's publish permissions only let the
+rightful identity use it.
 Connections follow a two-lane ladder: bring your own creds file (the
 self-custody bypass — used directly whenever presented, SoulIdentity out of
 the path) or bring an external token and arrive through auth callout

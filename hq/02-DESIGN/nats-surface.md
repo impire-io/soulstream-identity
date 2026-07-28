@@ -20,6 +20,9 @@ The socket surface, the `NATSOption` client seam, the file keystore, and the
 
 ## The operations
 
+Subjects below are shown at the bare default root; a deployment prefix
+(D14 as amended) prepends verbatim — `<prefix>.soulidentity.…`.
+
 | Subject (op suffix) | Milestone-1 op | Authorization (D18) | Body shapes |
 |---|---|---|---|
 | `soulidentity.status` *(open)* | `GET /v1/status` | none | unchanged |
@@ -62,6 +65,35 @@ change after consumers freeze the contract gets a new prefix as its escape,
 and until M2 lands the space may still change freely. The
 `<account>.<user>` tokens are not routing decoration; they are the
 principal claim — which D15 makes trustworthy.
+
+*Amended 2026-07-28 at the operator's direction (journey 0011): the root is
+`<prefix>.soulidentity`, with a **configurable shared ecosystem prefix**
+(empty by default — bare `soulidentity`).* The prefix is one value across
+the whole soulstream ecosystem — components find each other under it — and
+the *service segment* stays fixed per component so services share the
+prefix without colliding. Two things this buys:
+
+- **Environments.** The same realm can host several deployments
+  (`prod.soulstream.…`, `dev.soulstream.…`) without account gymnastics —
+  the original "run your own account for isolation" answer was too narrow.
+- **Cross-account composition.** With the account token at a declared
+  position — `P+2` (1-based), `P` = prefix token count — the exporting
+  account can publish the surface as
+  `export <prefix>.soulidentity.*.> with account_token_position = P+2`,
+  and the server forces each importing account's public key into that
+  token: D15's principal proof, extended across accounts by configuration
+  alone.
+
+The grammar: dot-separated tokens of `[A-Za-z0-9_-]+`, no wildcards. The
+honest cost, argued at decision time: the prefix is deployment agreement,
+and a consumer with the wrong one gets silent request timeouts, not errors
+— which is why the service logs its full root at startup and every CLI
+reads the shared `SOULSTREAM_PREFIX` environment variable by default.
+
+**Reversal condition** (written at decision time): recurring
+mismatch-timeout incidents attributed to prefix drift across components
+(observable: support issues naming the prefix) move service discovery to a
+well-known unprefixed subject as a new D-decision.
 
 ## D15 — The principal is the subject, and the server enforces it
 
@@ -213,8 +245,9 @@ Realizing D10 + D13, proven mechanically in journey 0004 [measured]:
 - The two xkey seeds: one environment variable each (flag accepted), per
   D13's amendment and D17; operator keygen tooling mints them.
 - The registry file path.
-- Bucket name; subject prefix fixed at `soulidentity` (a deployment
-  needing isolation runs its own account — subjects are account-local).
+- Bucket name; the shared ecosystem prefix (`--prefix`, defaulting to
+  `SOULSTREAM_PREFIX` — D14 as amended, one value across all soulstream
+  components).
 
 ## Audit
 

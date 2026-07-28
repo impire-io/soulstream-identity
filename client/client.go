@@ -20,8 +20,10 @@ import (
 	"github.com/nats-io/nkeys"
 )
 
-// Prefix roots the service's subject space (unversioned — D14).
-const Prefix = "soulidentity"
+// Segment is the service's fixed token in the subject space; the full root
+// is <prefix>.<Segment>, where the prefix is the deployment's shared
+// ecosystem namespace, empty by default (D14 as amended, journey 0011).
+const Segment = "soulidentity"
 
 // Key is a vault entry as the service shows it: never the secret.
 type Key struct {
@@ -61,6 +63,7 @@ type Client struct {
 	account string
 	user    string
 	timeout time.Duration
+	root    string // <prefix>.<Segment>; must match the service's deployment
 
 	mu         sync.Mutex
 	servicePub string // pinned via WithServiceXKey or learned by discovery
@@ -80,10 +83,22 @@ func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.timeout = d }
 }
 
+// WithPrefix targets a service deployed under a shared ecosystem prefix —
+// the same prefix the service was started with; a mismatch surfaces as
+// request timeouts, not errors.
+func WithPrefix(prefix string) Option {
+	return func(c *Client) {
+		c.root = Segment
+		if prefix != "" {
+			c.root = prefix + "." + Segment
+		}
+	}
+}
+
 // New returns a client speaking as (account, user) — the same identity nc is
 // authenticated as; the server refuses the subject prefix otherwise.
 func New(nc *nats.Conn, account, user string, opts ...Option) *Client {
-	c := &Client{nc: nc, account: account, user: user, timeout: 10 * time.Second}
+	c := &Client{nc: nc, account: account, user: user, timeout: 10 * time.Second, root: Segment}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -108,7 +123,7 @@ func (c *Client) serviceXKey() (string, error) {
 	if c.servicePub != "" {
 		return c.servicePub, nil
 	}
-	msg, err := c.nc.Request(Prefix+".xkey", nil, c.timeout)
+	msg, err := c.nc.Request(c.root+".xkey", nil, c.timeout)
 	if err != nil {
 		return "", fmt.Errorf("soulidentity: service discovery: %w", err)
 	}
@@ -149,7 +164,7 @@ func (c *Client) call(op string, in, out any) error {
 		return fmt.Errorf("soulidentity: encode envelope: %w", err)
 	}
 
-	subject := strings.Join([]string{Prefix, c.account, c.user, op}, ".")
+	subject := strings.Join([]string{c.root, c.account, c.user, op}, ".")
 	msg, err := c.nc.Request(subject, req, c.timeout)
 	if err != nil {
 		return fmt.Errorf("soulidentity: %s: %w", op, err)
@@ -186,7 +201,7 @@ func (c *Client) call(op string, in, out any) error {
 // Status returns the service's version, doubling as a liveness probe. It is
 // one of the two open (unsealed) ops.
 func (c *Client) Status() (string, error) {
-	msg, err := c.nc.Request(Prefix+".status", nil, c.timeout)
+	msg, err := c.nc.Request(c.root+".status", nil, c.timeout)
 	if err != nil {
 		return "", fmt.Errorf("soulidentity: status: %w", err)
 	}

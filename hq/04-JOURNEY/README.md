@@ -17,6 +17,18 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
+**The subject space gained its ecosystem namespace**
+([episode 0011](0011-the-shared-subject-prefix.md), D14 amended at the
+operator's direction): the root is `<prefix>.soulidentity` with the prefix
+shared across all soulstream components (`--prefix` /
+`SOULSTREAM_PREFIX`), empty by default. Environments coexist in one realm,
+and the account token sits at declared position `P+2`, so a cross-account
+export (`account_token_position`) extends D15's principal proof by
+configuration alone. The M3 gate e2e now runs fully prefixed
+(`prod.soulstream.soulidentity.>`) [measured]; the honest cost — prefix
+mismatch is silent timeouts — is mitigated by the startup root log and the
+shared environment variable.
+
 **Milestone 4 — auth callout, the front door — is shipped**
 ([episode 0010](0010-m4-auth-callout-ships.md); design
 [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), D19–D22,
@@ -111,3 +123,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0008 | [The sentinel-credential flow: URL + token is enough](0008-sentinel-credential-flow.md) |
 | 0009 | [The claims-mapping shape: one pipeline, policy never in the credential store](0009-claims-mapping-shape.md) |
 | 0010 | [M4: auth callout ships, the front door opens](0010-m4-auth-callout-ships.md) |
+| 0011 | [The shared subject prefix: one namespace for the ecosystem](0011-the-shared-subject-prefix.md) |

@@ -117,9 +117,11 @@ func defaultDataDir() string {
 }
 
 // connFlags registers the connection flags shared by every NATS-speaking
-// subcommand.
+// subcommand, plus the deployment's shared subject prefix (D14 as amended):
+// --prefix, defaulting to SOULSTREAM_PREFIX — one value across the whole
+// soulstream ecosystem so components find each other.
 type connFlags struct {
-	context, url, creds *string
+	context, url, creds, prefix *string
 }
 
 func addConnFlags(fs *flag.FlagSet) connFlags {
@@ -127,6 +129,7 @@ func addConnFlags(fs *flag.FlagSet) connFlags {
 		context: fs.String("context", "", "NATS CLI context name (github.com/synadia-io/orbit.go/natscontext)"),
 		url:     fs.String("url", "", "NATS server URL (default "+nats.DefaultURL+")"),
 		creds:   fs.String("creds-file", "", "creds file for the connection (the bypass lane, D12)"),
+		prefix:  fs.String("prefix", os.Getenv("SOULSTREAM_PREFIX"), "shared ecosystem subject prefix (default $SOULSTREAM_PREFIX)"),
 	}
 }
 
@@ -171,11 +174,14 @@ func newClient(cf connFlags, as string) (*client.Client, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := service.ValidatePrefix(*cf.prefix); err != nil {
+		return nil, nil, err
+	}
 	nc, err := cf.connect()
 	if err != nil {
 		return nil, nil, err
 	}
-	return client.New(nc, account, user), nc.Close, nil
+	return client.New(nc, account, user, client.WithPrefix(*cf.prefix)), nc.Close, nil
 }
 
 // seedFromFlagOrEnv resolves an xkey seed: flag first (accepted, but argv is
@@ -285,6 +291,10 @@ func cmdServe(args []string, errw io.Writer) error {
 			"sealed_requests", calloutSeed != "")
 	}
 
+	if err := service.ValidatePrefix(*cf.prefix); err != nil {
+		return err
+	}
+	svcOpts = append(svcOpts, service.WithPrefix(*cf.prefix))
 	svc, err := service.New(v, reg, surfaceSeed, log, svcOpts...)
 	if err != nil {
 		return err
@@ -293,7 +303,9 @@ func cmdServe(args []string, errw io.Writer) error {
 	if err != nil {
 		return err
 	}
-	log.Info("service serving", "subjects", service.Prefix+".>", "bucket", *bucket,
+	// The root is logged deliberately: a consumer with a mismatched prefix
+	// sees timeouts, and this line is where the mismatch is diagnosed.
+	log.Info("service serving", "subjects", svc.Root()+".>", "bucket", *bucket,
 		"registry", *registryPath, "version", version.Version)
 	<-ctx.Done()
 	_ = sub.Drain()
@@ -420,13 +432,16 @@ func cmdStatus(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := service.ValidatePrefix(*cf.prefix); err != nil {
+		return err
+	}
 	nc, err := cf.connect()
 	if err != nil {
 		return err
 	}
 	defer nc.Close()
 	// Status is an open op: no principal needed.
-	ver, err := client.New(nc, "", "").Status()
+	ver, err := client.New(nc, "", "", client.WithPrefix(*cf.prefix)).Status()
 	if err != nil {
 		return err
 	}

@@ -55,7 +55,7 @@ func harness(t *testing.T) (*Service, string) {
 func call(t *testing.T, s *Service, account, user, op string, body, out any) error {
 	t.Helper()
 	var x xkeyResponse
-	if err := json.Unmarshal(s.respond(Prefix+".xkey", nil), &x); err != nil {
+	if err := json.Unmarshal(s.respond(Segment+".xkey", nil), &x); err != nil {
 		t.Fatalf("xkey discovery: %v", err)
 	}
 	eph, _ := nkeys.CreateCurveKeys()
@@ -69,7 +69,7 @@ func call(t *testing.T, s *Service, account, user, op string, body, out any) err
 		t.Fatalf("seal: %v", err)
 	}
 	req := marshal(envelope{XKey: ephPub, Data: sealed})
-	reply := s.respond(strings.Join([]string{Prefix, account, user, op}, "."), req)
+	reply := s.respond(strings.Join([]string{Segment, account, user, op}, "."), req)
 
 	var env envelope
 	if err := json.Unmarshal(reply, &env); err != nil || len(env.Data) == 0 {
@@ -103,11 +103,11 @@ func (e *wireError) Error() string { return e.msg }
 func TestOpenOpsArePlaintext(t *testing.T) {
 	s, _ := harness(t)
 	var st statusResponse
-	if err := json.Unmarshal(s.respond(Prefix+".status", nil), &st); err != nil {
+	if err := json.Unmarshal(s.respond(Segment+".status", nil), &st); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	var x xkeyResponse
-	if err := json.Unmarshal(s.respond(Prefix+".xkey", nil), &x); err != nil {
+	if err := json.Unmarshal(s.respond(Segment+".xkey", nil), &x); err != nil {
 		t.Fatalf("xkey: %v", err)
 	}
 	if !strings.HasPrefix(x.XKey, "X") {
@@ -307,9 +307,68 @@ func TestTokenAndSentinelOps(t *testing.T) {
 	}
 }
 
+func TestPrefixedSubjectSpace(t *testing.T) {
+	s, acc := harness(t)
+	WithPrefix("prod.soulstream")(s)
+	if s.Root() != "prod.soulstream."+Segment {
+		t.Fatalf("root: %q", s.Root())
+	}
+
+	// Open ops answer under the prefixed root and nowhere else.
+	var st statusResponse
+	if err := json.Unmarshal(s.respond(s.Root()+".status", nil), &st); err != nil {
+		t.Fatalf("prefixed status: %v", err)
+	}
+	var er errorResponse
+	if err := json.Unmarshal(s.respond(Segment+".status", nil), &er); err != nil || er.Error == "" {
+		t.Fatal("bare-root subject answered on a prefixed service")
+	}
+
+	// A sealed principal op works under the prefixed root: drive respond the
+	// way call() does, but against the prefixed subject.
+	var x xkeyResponse
+	if err := json.Unmarshal(s.respond(s.Root()+".xkey", nil), &x); err != nil {
+		t.Fatalf("xkey: %v", err)
+	}
+	eph, _ := nkeys.CreateCurveKeys()
+	ephPub, _ := eph.PublicKey()
+	plain, _ := json.Marshal(struct{}{})
+	sealedBody, err := eph.Seal(plain, x.XKey)
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	req := marshal(envelope{XKey: ephPub, Data: sealedBody})
+	reply := s.respond(s.Root()+"."+acc+".ops.identities.list", req)
+	var env envelope
+	if err := json.Unmarshal(reply, &env); err != nil || len(env.Data) == 0 {
+		t.Fatalf("prefixed principal op did not answer an envelope: %s", reply)
+	}
+	opened, err := eph.Open(env.Data, x.XKey)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var ids identitiesResponse
+	if err := json.Unmarshal(opened, &ids); err != nil || len(ids.Identities) == 0 {
+		t.Fatalf("prefixed op result: %s", opened)
+	}
+}
+
+func TestValidatePrefix(t *testing.T) {
+	for _, good := range []string{"", "prod", "prod.soulstream", "a-b_c.d1"} {
+		if err := ValidatePrefix(good); err != nil {
+			t.Fatalf("legal prefix %q refused: %v", good, err)
+		}
+	}
+	for _, bad := range []string{".", "a..b", "a.*", "a.>", "$SYS", "sp ace", "a."} {
+		if err := ValidatePrefix(bad); err == nil {
+			t.Fatalf("prefix %q must be refused", bad)
+		}
+	}
+}
+
 func TestMalformedRequestsRefusePlaintext(t *testing.T) {
 	s, acc := harness(t)
-	reply := s.respond(strings.Join([]string{Prefix, acc, "daan", "mint"}, "."), []byte("not-json"))
+	reply := s.respond(strings.Join([]string{Segment, acc, "daan", "mint"}, "."), []byte("not-json"))
 	var er errorResponse
 	if err := json.Unmarshal(reply, &er); err != nil || er.Error == "" {
 		t.Fatalf("malformed request must draw a plaintext error, got %s", reply)
@@ -319,7 +378,7 @@ func TestMalformedRequestsRefusePlaintext(t *testing.T) {
 		t.Fatalf("unknown op: %v", err)
 	}
 	var er2 errorResponse
-	if err := json.Unmarshal(s.respond(Prefix+".nope", nil), &er2); err != nil || er2.Error == "" {
+	if err := json.Unmarshal(s.respond(Segment+".nope", nil), &er2); err != nil || er2.Error == "" {
 		t.Fatal("unknown open subject must draw an error")
 	}
 }

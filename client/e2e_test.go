@@ -27,6 +27,14 @@ import (
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
+// The M3 e2e runs under a shared ecosystem prefix (D14 as amended, journey
+// 0011): the scope templates, the observer, and every client carry it — the
+// M4 e2e covers the bare default.
+const (
+	e2ePrefix = "prod.soulstream"
+	e2eRoot   = e2ePrefix + "." + client.Segment
+)
+
 // TestM3GateAgainstOperatorModeServer is the NATS-native rebuild's end-to-end
 // proof [measured] — the M3 gate (hq/02-DESIGN/nats-surface.md, acceptance
 // criteria): a NATS server in operator mode with JetStream, the service on
@@ -76,8 +84,8 @@ func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	scope.Template = jwt.UserPermissionLimits{
 		Permissions: jwt.Permissions{
 			Pub: jwt.Permission{Allow: jwt.StringList{
-				"soulidentity.status", "soulidentity.xkey",
-				"soulidentity.{{account-subject()}}.{{name()}}.>",
+				e2eRoot + ".status", e2eRoot + ".xkey",
+				e2eRoot + ".{{account-subject()}}.{{name()}}.>",
 			}},
 			Sub: jwt.Permission{Allow: jwt.StringList{"_INBOX.>"}},
 		},
@@ -125,12 +133,12 @@ jetstream { store_dir: %q }
 	serviceCreds := issueUser(t, accKP, "service", nil)
 	adminCreds := issueUser(t, accKP, "ops", &jwt.Permissions{
 		Pub: jwt.Permission{Allow: jwt.StringList{
-			"soulidentity.status", "soulidentity.xkey", "soulidentity." + accPub + ".ops.>",
+			e2eRoot + ".status", e2eRoot + ".xkey", e2eRoot + "." + accPub + ".ops.>",
 		}},
 		Sub: jwt.Permission{Allow: jwt.StringList{"_INBOX.>"}},
 	})
 	observerCreds := issueUser(t, accKP, "observer", &jwt.Permissions{
-		Sub: jwt.Permission{Allow: jwt.StringList{"soulidentity.>"}},
+		Sub: jwt.Permission{Allow: jwt.StringList{e2eRoot + ".>"}},
 	})
 
 	// --- The service: registry with the operator-declared first admin row,
@@ -168,7 +176,8 @@ jetstream { store_dir: %q }
 		t.Fatalf("vault verify: %v", err)
 	}
 	audit := &syncBuffer{}
-	svc, err := service.New(v, reg, string(surfaceSeed), newAuditLogger(audit))
+	svc, err := service.New(v, reg, string(surfaceSeed), newAuditLogger(audit),
+		service.WithPrefix(e2ePrefix))
 	if err != nil {
 		t.Fatalf("service: %v", err)
 	}
@@ -184,7 +193,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("admin connect: %v", err)
 	}
 	t.Cleanup(ncAdmin.Close)
-	admin := client.New(ncAdmin, accPub, "ops")
+	admin := client.New(ncAdmin, accPub, "ops", client.WithPrefix(e2ePrefix))
 	if _, err := admin.Status(); err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -222,7 +231,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("daan connect: %v", err)
 	}
 	t.Cleanup(ncDaan.Close)
-	daan := client.New(ncDaan, accPub, "daan")
+	daan := client.New(ncDaan, accPub, "daan", client.WithPrefix(e2ePrefix))
 
 	// Proof 2 setup: the observer captures daan's request off the wire.
 	ncObserver, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(observerCreds))
@@ -231,7 +240,7 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(ncObserver.Close)
 	captured := make(chan *nats.Msg, 8)
-	if _, err := ncObserver.ChanSubscribe("soulidentity."+accPub+".daan.>", captured); err != nil {
+	if _, err := ncObserver.ChanSubscribe(e2eRoot+"."+accPub+".daan.>", captured); err != nil {
 		t.Fatalf("observer subscribe: %v", err)
 	}
 	if err := ncObserver.Flush(); err != nil {
@@ -281,7 +290,8 @@ jetstream { store_dir: %q }
 	// --- Proof 4 [measured]: another identity's prefix is refused by the
 	// server itself — the request times out and never reaches the service.
 	auditBefore := audit.String()
-	imposter := client.New(ncDaan, accPub, "ops", client.WithTimeout(1500*time.Millisecond))
+	imposter := client.New(ncDaan, accPub, "ops",
+		client.WithPrefix(e2ePrefix), client.WithTimeout(1500*time.Millisecond))
 	if _, err := imposter.Keys(); err == nil {
 		t.Fatal("daan reached ops's prefix")
 	}
