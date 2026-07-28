@@ -77,11 +77,11 @@ arrive over the NATS surface).
    connection authenticated by an external credential, with server-enforced
    permissions and the external identity attributable in the audit log, and
    a creds-file connection verified natively with SoulIdentity out of the
-   path [measured], against self-hosted NATS. The sentinel-credential flow
-   is decided (D19–D21,
-   [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)); still
-   needed before build: the claims-mapping shape and the NGS answer
-   (below).
+   path [measured], against self-hosted NATS. The design is complete for
+   the API-token backend (D19–D22,
+   [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)); the
+   self-hosted build is unblocked. The NGS answer (below) gates promising
+   callout on NGS, not this build.
 5. **M5 — attestation issuance.** Soulstream `operated_by` attestation tokens
    issued from the vault (D6's static half). Gated on demand from the
    Soulstream side.
@@ -109,12 +109,13 @@ arrive over the NATS surface).
   ([journey 0004](../04-JOURNEY/0004-first-key-story.md), D13): a `0600`
   local file on the service host, minted at first start; bootstrap is two
   operator acts + one automatic service act [measured].
-- **The claims-mapping shape** (gates M4): which token issuers are trusted,
-  which claim names the team, how a team maps to a role and allowed
-  personas — the declared configuration behind claims-derived authorization
-  (D2). D12's reversal condition watches this one: mapping exceptions
-  accumulating per user means the registry should have stayed the sole
-  source.
+- ~~**The claims-mapping shape** (gated M4)~~ — answered 2026-07-28
+  ([journey 0009](../04-JOURNEY/0009-claims-mapping-shape.md), D22):
+  validate → authorize → mint; the token record names an identity and
+  carries no policy; Entra later is validator config + the D2
+  claims-derived rules on the same interface; the issued-JWT TTL is the
+  revocation propagation bound [measured]. D12's watch stays armed inside
+  D22's reversal condition.
 - **Service round-trip latency under real load** (informs M2/M3): signing
   and mint requests ride NATS request/reply, and callout sits on the connect
   path for represented users; the MCP node's real usage will measure both.

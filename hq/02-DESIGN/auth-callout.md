@@ -2,14 +2,12 @@
 
 *The design M4 implements: SoulIdentity as the NATS auth-callout issuer —
 the second lane of the connection ladder (D12), representing external
-identities inside NATS. Decisions here continue the numbering: D19–D21,
-grounded in the sentinel-credential research
-([journey 0008](../04-JOURNEY/0008-sentinel-credential-flow.md)) [measured
-where tagged]. **This document is deliberately incomplete**: the
-claims-mapping shape (which token issuers are trusted, which claim names
-the team, how a team maps to role and personas — D2's declared
-configuration) is its own gated research topic and lands here when it
-concludes. The milestone and gate live in
+identities inside NATS. Decisions here continue the numbering: D19–D22,
+grounded in the sentinel-credential and claims-mapping research
+([journey 0008](../04-JOURNEY/0008-sentinel-credential-flow.md),
+[journey 0009](../04-JOURNEY/0009-claims-mapping-shape.md)) [measured
+where tagged]. The first authn backend is API tokens; Entra/OIDC follows
+as configuration on the same shape (D22). The milestone and gate live in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## D19 — The connection contract: URL plus credential, sentinel underneath
@@ -73,10 +71,49 @@ target accounts. SoulIdentity thus holds for M4: the AUTH account seed,
 the callout xkey seed, and the role keys it already had — no new key
 class, one new account.
 
+## D22 — The mapping shape: validate, authorize, mint — policy never in the credential store
+
+*Decided 2026-07-28 by research graduation (`claims-mapping-shape`, journey
+0009; operator scoping: API tokens first, Entra later.)* The issuer runs
+one declared pipeline:
+
+1. **validate(credential) → subject (+claims).** The API-token validator
+   is a SHA-256 digest lookup in the token store — a KV bucket whose
+   record schema is, in full: `{account, user, label, expires?}`. The
+   record *names* an identity and carries nothing else; the store holds
+   digests, never plaintext (shown once at issuance) [measured]. Unsalted
+   SHA-256 is honest only because tokens are generated high-entropy
+   (256-bit); this is explicitly not a password scheme. The later
+   Entra/OIDC validator is configuration: issuer allow-list, JWKS,
+   audience, and the claim that names the subject.
+2. **authorize(subject, claims) → (account, user, role, personas,
+   admin).** For API tokens this is exactly the registry row (the
+   registry-declared source, D2); a token mapping to no row is refused
+   [measured]. Entra adds the claims-derived source D2 already names —
+   declared team rules `(issuer, team-claim value) → {account, role,
+   personas}` — as a fallback behind the registry row, feeding the same
+   stage; the interface does not change.
+3. **mint** — the existing D20 path, unchanged.
+
+The credential store and the policy store are different stores with
+different custody rules, meeting only in `authorize`. Two operational
+facts, measured: **revocation** (deleting the token record) refuses the
+next connection attempt, and the **issued-JWT TTL is the revocation
+propagation bound** — at expiry the server disconnects, the client's
+reconnect re-fires callout, and the revoked token is refused. The TTL is
+therefore a deliberate M4 configuration knob whose price is one callout
+round-trip per TTL per open connection [measured].
+
+**Reversal condition** (inherited from D12's watch): any policy field —
+permission, persona, role — proposed for the token record schema, or a
+claim rule overriding a registry column per user, demotes claims-derived
+authorization to a bootstrap convenience and returns the registry to sole
+policy source.
+
 ## Not yet decided (pending research)
 
-- **The claims-mapping shape** — the declared rules from validated token
-  claims to (identity, role, personas). Gates the build; its research
-  registers its own bars.
 - **NGS**: whether a Synadia-managed server exposes callout configuration
   at all (`ngs-capabilities`) — the open half of D11's reversal condition.
+  Blocked on operator access to the Synadia Cloud account (the account
+  currently refuses connections at its plan cap [measured 2026-07-28]).
+  This gates promising callout on NGS, not the self-hosted M4 build.

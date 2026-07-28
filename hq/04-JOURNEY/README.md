@@ -17,17 +17,25 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-28)
 
-**M4 research is under way — the sentinel-credential flow is decided**
-([episode 0008](0008-sentinel-credential-flow.md); design
-[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), D19–D21):
+**M4's design is complete for the API-token backend — the build is
+unblocked** ([episode 0008](0008-sentinel-credential-flow.md) then
+[episode 0009](0009-claims-mapping-shape.md); design
+[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), D19–D22):
 an external-identity client holds the URL and its token, nothing else —
 `default_sentinel` assigns the (bearer, deny-all, public-by-design)
-sentinel server-side, callout fires with the token, and the issuer mints a
-scoped user JWT for the **server-assigned** ephemeral key using the vault's
-existing role keys. All bars [measured]; refusals and issuer-down fail
-closed; D12's "client's own key" wording corrected. Still gating M4: the
-claims-mapping shape (research not yet opened) and the NGS capabilities
-answer (needs the real Synadia account).
+sentinel server-side, callout fires with the token, and the issuer runs
+one pipeline: digest-validate against the token store (whose records name
+an identity and carry **no policy**), authorize via the registry row, and
+mint a scoped user JWT for the **server-assigned** ephemeral key with the
+vault's existing role keys. Everything fails closed; the issued-JWT TTL is
+the revocation propagation bound [all measured]; Entra/OIDC arrives later
+as validator configuration plus the D2 claims-derived rules on the same
+interface. The operator scoped the backends (API tokens first, Entra
+later); D12's "client's own key" wording was corrected by the protocol
+(journey 0008). The one open research thread — `ngs-capabilities` — is
+blocked on operator access to the Synadia account (its plan cap currently
+refuses connections) and gates only the NGS deployment class, not the
+self-hosted build.
 
 **Milestone 3 — the NATS-native rebuild — is shipped**
 ([episode 0007](0007-m3-the-nats-native-rebuild.md); design
@@ -101,3 +109,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0006 | [Design review: seeds from the environment, no v1, D15 taught back](0006-design-review-amendments.md) |
 | 0007 | [M3: the NATS-native rebuild ships](0007-m3-the-nats-native-rebuild.md) |
 | 0008 | [The sentinel-credential flow: URL + token is enough](0008-sentinel-credential-flow.md) |
+| 0009 | [The claims-mapping shape: one pipeline, policy never in the credential store](0009-claims-mapping-shape.md) |
