@@ -6,16 +6,17 @@ non-negotiables.
 
 ## Orientation (read in this order)
 
-1. `hq/00-GENESIS/` — [`vision.md`](hq/00-GENESIS/vision.md) (an ssh-agent for
-   personas: what it is and refuses to become — not a KMS, not a parallel
-   permission system, not a required component),
+1. `hq/00-GENESIS/` — [`vision.md`](hq/00-GENESIS/vision.md) (the identity
+   plane on NATS: representation of identity for humans and agents, and what
+   it refuses to become — not a KMS, not a parallel permission system, not an
+   identity provider, not required for local sessions),
    [`constitution.md`](hq/00-GENESIS/constitution.md) (the articles no change
    may violate, plus the anti-drift working agreement), and
    [`how-we-work.md`](hq/00-GENESIS/how-we-work.md) (pipeline, research
    lifecycle, the journey duty). Decisions are held against these.
 2. `hq/04-JOURNEY/README.md` — where things stand + the episode index.
 3. `hq/03-IMPLEMENTATION/ROADMAP.md` — the milestones and their gates.
-4. `hq/02-DESIGN/agent.md` — the design and its numbered decisions (D1–D10);
+4. `hq/02-DESIGN/agent.md` — the design and its numbered decisions (D1–D11);
    code comments cite these D-numbers.
 
 ## Non-negotiables (constitution articles, in brief)

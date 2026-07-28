@@ -1,30 +1,33 @@
 # SoulIdentity — the agent design
 
-*An ssh-agent for personas: an identity vault, a signing oracle, and a NATS
-credential minter for the Soulstream ecosystem. Decisions below are numbered
-D1–D10; each records its reasoning so it can be re-argued honestly later.
-Milestone status lives in
+*The identity plane of the Soulstream ecosystem: an identity vault, a signing
+oracle, and a NATS credential minter, delivered as a NATS service. Decisions
+below are numbered D1–D11; each records its reasoning so it can be re-argued
+honestly later. Milestone status lives in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## What it is
 
-SoulIdentity is a small daemon that holds every secret an operator's personas
-need — NATS account signing keys, NATS user keys, persona Ed25519
-record-signing keys, later X25519 sealing keys — behind a socket, and answers
-**sign requests instead of handing out keys**. Consumers (the Soulstream CLI,
-MCP servers, the future remote MCP node) authenticate to the agent, name the
+SoulIdentity is the representation of identity for humans and agents in the
+Soulstream ecosystem. It holds every secret its identities need — NATS
+account signing keys, NATS user keys, persona Ed25519 record-signing keys,
+later X25519 sealing keys — and answers **sign and mint requests instead of
+handing out keys**. Consumers (the Soulstream CLI, MCP servers, the remote
+MCP node, the NATS server itself in callout mode) authenticate, name the
 identity they act for, and receive signatures and minted credentials. The
 seeds never cross the API.
 
-The shape is deliberately ssh-agent's: a local Unix socket where filesystem
-permissions are the authentication, a vault directory owned by the OS user,
-and a client library that plugs the oracle into the places that used to read
-key files. A remote/TCP mode with real authentication layers on later without
-changing the model — the socket is just the first, simplest boundary.
+The primary surface is NATS-native (D11): request/reply with xkey-sealed
+payloads, the caller authenticated by its own NATS identity. The shipped
+walking skeleton speaks the same contract over a local Unix socket where
+filesystem permissions are the authentication — that socket remains the
+bootstrap and laptop rung (D8), because the first NATS connection cannot be
+signed through a service reached over that same connection.
 
 ## Why it exists
 
-Two forces converged (Soulstream journey, 2026-07-28 design thread):
+Three forces converged (Soulstream journey, 2026-07-28 design thread; the
+third named at the 2026-07-28 re-centering, journey 0002):
 
 1. **Remote MCP.** Claude Desktop, LibreChat, claude.ai connectors and most
    non-CLI clients speak remote MCP, so `soulstream-mcp` must run as a shared
@@ -38,8 +41,15 @@ Two forces converged (Soulstream journey, 2026-07-28 design thread):
    real — defense in depth beside the Soulstream signature, and the layer the
    sealed-topics design leans on for subject restrictions. Per-user
    connections need per-user credentials, which something must mint and hold.
+3. **External identities.** Humans and agents arrive with outside-world
+   identities — an Entra/OIDC principal, an API token — and must be
+   *represented* inside NATS: the right identity, the right permissions,
+   minted from the account signing keys and fully attributable. Something
+   that already holds those keys and the act-as registry is the natural
+   place; this is what moved representation from a later rung to the mission
+   (journey 0002).
 
-## D1 — Nonce signing is the native seam
+## D1 — Nonce signing is the local seam
 
 NATS NKey authentication is challenge-response: the server sends a nonce, the
 client signs it. `nats.go` accepts the signature as a **callback**
@@ -52,6 +62,14 @@ The same pattern extends up one layer: Soulstream record signing becomes
 "sign these canonical bytes as persona X" (the `Signer` seam in the
 soulstream library, feature 017). One agent, two signature kinds, one audit
 trail.
+
+*Amended 2026-07-28 (journey 0002): demoted from "the native seam" to the
+local one.* The nonce oracle only works over a non-NATS transport — a client
+cannot reach a NATS-hosted oracle to sign the nonce of the very connection it
+is establishing [mechanism-argument]. On the primary NATS surface (D11) the
+connection story is durable minted creds or auth callout (D4 rung 3); live
+nonce signing remains the seam for the local socket rung and for record
+signing, which happens on an already-established connection.
 
 ## D2 — Identities are declared, never inferred
 
@@ -83,8 +101,12 @@ Deployments climb a ladder; the identity registry is the same at every rung:
    key(s), register identities, mint.
 3. **Auth-callout mode** — SoulIdentity (or a plugin behind it) acts as the
    NATS auth-callout service: it validates the connecting user against a
-   pluggable backend (KV, OIDC, LDAP, …) and issues **ephemeral** user JWTs.
-   For dynamic fleets and external identity providers.
+   pluggable backend (KV of API tokens, Entra/OIDC, LDAP, …) and issues
+   **ephemeral** user JWTs. *Amended 2026-07-28 (journey 0002): this rung is
+   the flagship, not the ceiling* — it is the front door through which
+   external identities get represented inside NATS, and the callout protocol
+   is already a NATS service speaking xkey-encrypted payloads, i.e. the same
+   shape as the primary surface (D11).
 
 A policy KV consulted *instead of* NATS enforcement would be a second source
 of truth; the same KV as the *backend of the callout issuer* is the native
@@ -122,14 +144,18 @@ a creds file. For tools that need one (`nats` CLI), export exists as an
 operator chooses to move a secret out of custody; it never happens as a side
 effect.
 
-## D8 — Local mode's principal is the OS user
+## D8 — Local mode's principal is the OS user; the socket is the bootstrap rung
 
 Milestone 1 authenticates the way ssh-agent does: socket mode 0600, vault
 dir 0700 — whoever owns the socket owns the agent. Claimed identities on the
 local socket are honour-system within that boundary and every operation is
-still logged. Real per-caller authentication (tokens, mTLS) arrives with the
-TCP listener; the API shape already carries the identity parameter so
-nothing changes but the checking.
+still logged. *Amended 2026-07-28 (journey 0002):* real per-caller
+authentication arrives with the NATS surface (D11), where the caller's own
+NATS identity is the principal — not with a TCP listener and a parallel
+token scheme, which is dropped. The API shape already carries the identity
+parameter so nothing changes but the checking. The socket does not
+disappear: it is the bootstrap and laptop rung, the one surface reachable
+before any NATS connection exists (D1).
 
 ## D9 — Sealed topics: unwrap once, no decrypt oracle
 
@@ -144,8 +170,54 @@ oracle is a non-goal; nobody should later design one by symmetry.
 The Soulstream-specific value is the persona model, act-as policy, and
 minting logic. Crypto storage is commodity: milestone 1 is a file keystore
 (0600 seed files, matching `soulstream key init` conventions); the backend
-interface is the extension point for OS keychains or a Vault transit engine
-later. SoulIdentity wraps storage, it does not reimplement it.
+interface is the extension point. *Amended 2026-07-28 (journey 0002): the
+named next backend is NATS KV with xkey envelope encryption at rest* — seeds
+stored as ciphertext in a KV bucket, unwrapped only inside the vault
+process. Stated honestly: envelope encryption relocates the root secret (the
+unwrapping xkey seed stays a local file or moves to an OS keychain), it does
+not eliminate it; the first-key story is a research question gating that
+backend. OS keychains and a Vault transit engine remain later options.
+SoulIdentity wraps storage, it does not reimplement it.
+
+## D11 — The service surface is NATS-native
+
+*Decided 2026-07-28 at the identity-plane re-centering (journey 0002),
+superseding the planned TCP listener.* SoulIdentity's primary surface is a
+NATS service: request/reply on its own subject space, every payload sealed
+end-to-end with xkeys (the caller encrypts to the service's curve key and
+vice versa, so not even the NATS server sees request bodies), and the caller
+authenticated by its own NATS identity — which becomes the principal that
+act-as policy (D6) is enforced against and that audit entries name.
+
+Why NATS instead of the TCP-plus-tokens listener the genesis planned
+[mechanism-argument]:
+
+- **Caller authentication comes free and is the same trust fabric.** A TCP
+  listener needs a parallel credential scheme (tokens, mTLS) — a second
+  identity system inside an identity project. On NATS the caller already
+  *is* an authenticated identity the server verified.
+- **It is the shape callout already has.** Auth-callout mode (D4 rung 3) is
+  by protocol a NATS service receiving xkey-encrypted requests. One surface
+  shape serves both the API and the callout duty.
+- **It composes with the ecosystem.** Consumers of SoulIdentity are NATS
+  clients already; a NATS surface needs no new listener, port, or TLS story.
+
+The strongest argument against, recorded at full strength: the bootstrap.
+The minter of NATS credentials cannot itself require NATS credentials to
+reach — so the NATS surface can never be the *only* surface. The answer is
+the ladder (D4, D8): the local socket serves the pre-NATS moment and the
+laptop case, callout's sentinel-credential flow serves external identities,
+and durable minted creds serve everything in between. Additionally, callout
+requires server-config control — self-hosted yes, managed NATS (NGS) an open
+research question on the roadmap.
+
+**Reversal condition** (written at decision time): if, by the time the first
+external consumer needs external-identity onboarding, auth callout cannot be
+enabled on the deployment class consumers actually run (the NGS research
+verdict [measured]) or a sentinel-credential onboarding of an external
+identity cannot pass an end-to-end proof [measured], the NATS-native surface
+demotes to an optional mode and the local socket returns to the primary
+surface.
 
 ## Milestone 1 — the walking skeleton
 
@@ -167,6 +239,8 @@ later. SoulIdentity wraps storage, it does not reimplement it.
   a connection whose nonce is signed by the agent — the seed never leaving
   the vault [measured, in the test suite].
 
-Out of scope for milestone 1: TCP listener + caller authentication, auth
-callout, attestation issuance, sealing keys, non-file storage backends —
-each has a decision above naming its direction.
+Out of scope for milestone 1 (and shipped without them): the NATS service
+surface (D11), auth callout, attestation issuance, sealing keys, non-file
+storage backends — each has a decision above naming its direction. The
+walking skeleton's socket surface is the bootstrap rung (D8), not a
+deprecated artifact.

@@ -8,9 +8,10 @@ the system as it is.
 
 | Document | What it covers |
 |---|---|
-| [`agent.md`](agent.md) | The agent: vault, registry, oracle, mint — decisions D1–D10 and the milestone-1 shape |
+| [`agent.md`](agent.md) | The agent: vault, registry, oracle, mint — decisions D1–D11 and the milestone-1 shape |
 
 Future documents arrive by research graduation (see
 [`../01-RESEARCH/README.md`](../01-RESEARCH/README.md)) or design propagation
-from landed work; the roadmap names the expected ones (caller authentication,
-auth callout, attestation issuance, sealing keys).
+from landed work; the roadmap names the expected ones (the NATS service
+surface, auth callout, KV-backed vault storage, attestation issuance, sealing
+keys).

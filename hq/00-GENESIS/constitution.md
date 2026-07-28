@@ -64,8 +64,8 @@ audit. Every optional feature grows the surface an operator must believe in.
 ### IV. Documentation Is a First-Class Citizen
 
 - Every concept is explained plainly — an everyday analogy before technical
-  detail (the project's own name for itself is one: an ssh-agent for
-  personas). Plain words beat invented terms.
+  detail (the project's custody analogy is one: like an ssh-agent, it signs
+  instead of handing out keys). Plain words beat invented terms.
 - The design doc records every load-bearing decision with a D-number and its
   reasoning, so future changes argue against the real reasons.
 - Docs ship in the same change as the behavior they describe; stale
@@ -101,11 +101,19 @@ change, a scope call, or a public claim.
 
 - **Language**: Go, matching the ecosystem; official NATS libraries only
   (`nkeys`, `jwt/v2`, `nats.go`, embedded `nats-server` for tests).
-- **Secrets at rest**: 0600 files under 0700 directories in milestone 1;
-  further backends arrive through the storage seam, never by widening file
-  handling.
-- **Transport**: Unix socket first (filesystem permissions are the
-  authentication); TCP only together with real caller authentication.
+- **Secrets at rest**: 0600 files under 0700 directories in the file backend;
+  the named next backend is NATS KV with xkey envelope encryption at rest.
+  Further backends arrive through the storage seam, never by widening file
+  handling — and encryption at rest relocates the root secret (the unwrapping
+  xkey), it does not eliminate it; the first-key story is decided by research
+  before the backend lands.
+- **Transport**: NATS is the primary transport — request/reply with
+  xkey-sealed payloads (end-to-end encrypted), the caller authenticated by
+  its own NATS identity. The local Unix socket remains the bootstrap and
+  laptop mode (filesystem permissions are the authentication): it exists
+  because the first NATS connection cannot be signed through a service
+  reached over that same connection. A plain TCP listener with a parallel
+  token scheme is off the table — caller authentication comes from NATS.
 - **Dependencies**: an identity agent is judged by its audit surface — keep
   the dependency tree small enough to read.
 
@@ -132,9 +140,18 @@ change, a scope call, or a public claim.
   principle; MINOR — a new principle or section, or materially expanded
   guidance; PATCH — clarifications.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-28
+**Version**: 1.1.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-28
 
 *Amendment history:*
+- *1.1.0 (2026-07-28)* — the identity-plane re-centering (journey
+  [0002](../04-JOURNEY/0002-the-identity-plane-re-centering.md)): mission
+  redefined in `vision.md` from "a local ssh-agent for personas" to the
+  representation of identity for humans and agents, delivered as a NATS
+  service with xkey-sealed E2E request/reply. Technology Constraints
+  redefined accordingly — NATS becomes the primary transport (the planned
+  TCP-plus-tokens listener is dropped; the Unix socket demotes to the
+  bootstrap/laptop mode) and NATS KV with xkey envelope encryption is named
+  the next storage backend. Principles I–IV unchanged (MINOR).
 - *1.0.0 (2026-07-28)* — initial ratification (Principles I–IV + the working
   agreement), adopted at genesis with the hq structure (journey
   [0001](../04-JOURNEY/0001-genesis-and-the-walking-skeleton.md)).

@@ -1,16 +1,20 @@
 # SoulIdentity
 
-**An ssh-agent for personas.** SoulIdentity is a small daemon that holds the
-secrets an operator's personas need — NATS account signing keys, NATS user
-keys, persona record-signing keys — behind a Unix socket, and answers *sign
-requests* instead of handing out keys. Consumers name the identity they act
-for and receive signatures and minted NATS credentials; the seeds never cross
-the API.
+**The identity plane for the
+[Soulstream](https://github.com/impire-io/soulstream) ecosystem.**
+SoulIdentity is the representation of identity for humans and agents: a
+service that holds account signing keys, user keys, and persona
+record-signing keys, and answers *sign and mint requests* instead of handing
+out keys. Consumers name the identity they act for and receive signatures and
+minted NATS credentials; the seeds never cross the API. Identities arriving
+from the outside world — Entra/OIDC principals, API tokens — get represented
+inside NATS with the right identity and permissions, every mint attributable.
 
-Built for the [Soulstream](https://github.com/impire-io/soulstream)
-ecosystem: it is what lets a shared MCP node hold a NATS connection *per
-user* with real per-user credentials, and what keeps key custody auditable
-when personas run on infrastructure their operator does not sit in front of.
+The primary surface is NATS-native: request/reply with xkey-sealed end-to-end
+encryption, the caller authenticated by its own NATS identity. What ships
+today is the bootstrap rung of that ladder — a local socket agent, ssh-agent
+style — which also serves the laptop case and the moment before any NATS
+connection exists.
 
 The design — the decisions and their reasoning — lives in
 [hq/02-DESIGN/agent.md](hq/02-DESIGN/agent.md). **How this project is run
@@ -51,11 +55,14 @@ nc, _ := nats.Connect(url, opt)
 
 ## What it is not
 
-Not a KMS (storage backends are pluggable; the file keystore is the first),
-not an authorization server for your realm (NATS enforces transport
-permissions via scoped signing keys or auth callout; SoulIdentity decides
-only who may act as which persona), and not a place secrets leave: credential
-export exists solely as an explicit, named custody escape.
+Not a KMS (storage backends are pluggable; the file keystore is the first,
+NATS KV with xkey envelope encryption is the named next), not an identity
+provider (external identities are represented, never authenticated by us —
+authn backends plug into callout mode), not an authorization server for your
+realm (NATS enforces transport permissions via scoped signing keys or auth
+callout; SoulIdentity decides only who may act as which persona), and not a
+place secrets leave: credential export exists solely as an explicit, named
+custody escape.
 
 ## Status
 
@@ -63,8 +70,9 @@ Milestone 1 — walking skeleton. Local socket agent, file vault, identity
 registry, mint-from-scoped-signing-keys, NATS nonce oracle, proven end to end
 against an embedded NATS server in operator mode. See
 [hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for the
-ladder this grows along (TCP + caller auth, auth callout, attestation
-issuance, sealing keys).
+ladder this grows along (the NATS service surface, auth callout as the front
+door for external identities, KV-backed vault storage, attestation issuance,
+sealing keys).
 
 ## License
 

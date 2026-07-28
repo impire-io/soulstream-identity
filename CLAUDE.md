@@ -1,8 +1,10 @@
 # SoulIdentity — project instructions
 
-An ssh-agent for personas: identity vault, signing oracle, NATS credential
-minting for the Soulstream ecosystem. Module
-`github.com/impire-io/soulidentity`, Go 1.26.
+The identity plane of the Soulstream ecosystem: the representation of
+identity for humans and agents — identity vault, signing oracle, NATS
+credential minting — pointed at a NATS-native service surface with
+xkey-sealed E2E request/reply (the shipped socket agent is the bootstrap
+rung). Module `github.com/impire-io/soulidentity`, Go 1.26.
 
 **How this project is run lives in `hq/` — read [`AGENTS.md`](AGENTS.md)
 first** (orientation order + the non-negotiables), then hold decisions against
