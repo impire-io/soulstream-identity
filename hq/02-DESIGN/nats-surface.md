@@ -22,26 +22,31 @@ The socket surface, the `NATSOption` client seam, the file keystore, and the
 
 | Subject (op suffix) | Milestone-1 op | Body shapes |
 |---|---|---|
-| `soulidentity.v1.status` *(open)* | `GET /v1/status` | unchanged |
-| `soulidentity.v1.xkey` *(open, new)* | — | `{"xkey": "<service curve public key>"}` |
-| `soulidentity.v1.<acct>.<user>.keys.list` | `GET /v1/keys` | unchanged |
-| `soulidentity.v1.<acct>.<user>.keys.import` | `POST /v1/keys` | unchanged |
-| `soulidentity.v1.<acct>.<user>.identities.list` | `GET /v1/identities` | unchanged |
-| `soulidentity.v1.<acct>.<user>.identities.put` | `POST /v1/identities` | unchanged |
-| `soulidentity.v1.<acct>.<user>.sign.record` | `POST /v1/sign/record` | unchanged |
-| `soulidentity.v1.<acct>.<user>.mint` | `POST /v1/mint` | unchanged (creds export stays the loud D7 escape) |
+| `soulidentity.status` *(open)* | `GET /v1/status` | unchanged |
+| `soulidentity.xkey` *(open, new)* | — | `{"xkey": "<service curve public key>"}` |
+| `soulidentity.<acct>.<user>.keys.list` | `GET /v1/keys` | unchanged |
+| `soulidentity.<acct>.<user>.keys.import` | `POST /v1/keys` | unchanged |
+| `soulidentity.<acct>.<user>.identities.list` | `GET /v1/identities` | unchanged |
+| `soulidentity.<acct>.<user>.identities.put` | `POST /v1/identities` | unchanged |
+| `soulidentity.<acct>.<user>.sign.record` | `POST /v1/sign/record` | unchanged |
+| `soulidentity.<acct>.<user>.mint` | `POST /v1/mint` | unchanged (creds export stays the loud D7 escape) |
 | — | `POST /v1/sign/nonce` | **retired** — the nonce oracle left the connection story (D1, journey 0003) |
 
 `client/` rebuilds on NATS request/reply with the same mirror types; the
 socket transport and `NATSOption` go with it.
 
-## D14 — The subject space is versioned and principal-scoped
+## D14 — The subject space is principal-scoped, and unversioned
 
-Operations live at `soulidentity.v1.<account>.<user>.<op>`, with exactly two
-open subjects outside the principal scope: `status` and `xkey` (discovery —
-they reveal nothing an account member couldn't learn by connecting). `v1`
-answers the wire-contract one-way door: a breaking payload change after
-consumers exist is a new subject version, not a mutation. The
+Operations live at `soulidentity.<account>.<user>.<op>`, with exactly two
+open subjects outside the principal scope: `soulidentity.status` and
+`soulidentity.xkey` (discovery — they reveal nothing an account member
+couldn't learn by connecting; no token-count collision with principal
+subjects, which always carry more tokens). *Amended at design review before
+any build (2026-07-28, journey 0006): no `v1` token.* Versioning machinery
+before a single consumer exists is speculation (constitution III); the
+wire-contract one-way door is answered when it actually closes — a breaking
+change after consumers freeze the contract gets a new prefix as its escape,
+and until M2 lands the space may still change freely. The
 `<account>.<user>` tokens are not routing decoration; they are the
 principal claim — which D15 makes trustworthy.
 
@@ -50,7 +55,7 @@ principal claim — which D15 makes trustworthy.
 The NATS service surface has no native "caller identity" on a message. The
 decision: **the claimed principal is read off the subject, and its proof is
 the server's publish-permission enforcement** — a caller may only publish to
-`soulidentity.v1.<account>.<user>.>` for the identity it *is*, because its
+`soulidentity.<account>.<user>.>` for the identity it *is*, because its
 user JWT (scoped signing key template in mint mode, callout-issued
 permissions in callout mode, D5/D12) allows exactly its own prefix. The
 service never re-verifies the claim; it trusts what the server already
@@ -78,20 +83,35 @@ cannot carry the prefix template, recorded as an issue — the NGS research is
 the first place this could surface) forces a caller-authentication mechanism
 inside the envelope, as a new D-decision.
 
+*Taught back and confirmed 2026-07-28 (journey 0006).* The operator's
+restatement pinned the decision to its native cross-account extension: the
+same property rides NATS's import/export system — an export of the service's
+subject space declaring `account_token_position` forces the importing
+account's public key into that subject token, server-enforced, so the
+principal claim stays trustworthy across account boundaries
+[mechanism-argument]. Recorded as the extension path, not M3 scope: M3
+serves same-account consumers with the name tokens the registry already
+keys by; the first cross-account consumer (M2's node is the candidate)
+triggers the account token's move to the account public key — a
+subject-grammar change that must land before external consumers freeze the
+contract (the roadmap's wire-contract one-way door).
+
 ## D16 — The sealed envelope
 
 Every principal-scoped request body is sealed; the broker sees ciphertext
 (D11). The envelope is small and boring:
 
-- **Request** (JSON, plaintext outer): `{"v": 1, "xkey": "<ephemeral client
-  curve public key>", "data": "<base64 xkv1 ciphertext>"}` — `data` is the
-  op's unchanged JSON body, sealed to the service's surface xkey (D17).
+- **Request** (JSON, plaintext outer): `{"xkey": "<ephemeral client curve
+  public key>", "data": "<base64 xkv1 ciphertext>"}` — `data` is the op's
+  unchanged JSON body, sealed to the service's surface xkey (D17). No
+  version field (the D14 amendment's spirit): JSON's field extensibility is
+  the envelope's evolution story.
 - **Reply**: same envelope, `data` sealed to the request's ephemeral xkey,
   `xkey` carrying the service's. Errors travel inside the sealed body —
   the broker learns success/failure timing, not content.
-- **Discovery**: `soulidentity.v1.xkey` returns the service's surface
-  public key unsealed — it is public material; pinning it out of band is
-  the deployment's option, not a protocol requirement.
+- **Discovery**: `soulidentity.xkey` returns the service's surface public
+  key unsealed — it is public material; pinning it out of band is the
+  deployment's option, not a protocol requirement.
 - The two open ops (`status`, `xkey`) are plaintext both ways.
 
 Replay, analyzed honestly [mechanism-argument]: a broker (or anyone with
@@ -106,13 +126,16 @@ an inner timestamp/nonce goes into the sealed body as a compatible addition.
 
 ## D17 — Two curve keys, two domains
 
-The service holds two xkeys, both raw `SX…` seed files `0600` beside its
-creds, both minted on first start (the D13 pattern):
+The service holds two xkeys, each an `SX…` seed supplied by the deployment
+as an environment variable (flag accepted; the D13 amendment — env var is
+the documented default, the flag form's process-table visibility named as
+the cost), minted once by operator keygen tooling into the deployment's
+secret store:
 
-- **The first key** (`first-key.xk`, D13) — unseals the vault's KV records.
-  Never advertised, never leaves the host.
-- **The surface key** (`service.xk`) — advertised via discovery, seals
-  request/reply traffic.
+- **The first key** (D13) — unseals the vault's KV records. Never
+  advertised, never written to disk by the service.
+- **The surface key** — advertised via discovery, seals request/reply
+  traffic.
 
 One key could serve both; it doesn't, because the domains rotate and expose
 differently [mechanism-argument]: the surface key's public half is
@@ -133,10 +156,13 @@ Realizing D10 + D13, proven mechanically in journey 0004 [measured]:
 - The vault process unseals in memory only; `internal/vault` remains the
   custody boundary (constitution I) — the backend swap changes where
   ciphertext rests, not what the API returns.
-- First start: mint `first-key.xk` (refuse overwrite), create the bucket.
-  No migration tooling from the file keystore: milestone 1 shipped
-  unreleased with no external consumers, so the file backend retires by
-  deletion, not conversion [judgment].
+- First start: create the bucket — the seeds arrive from the environment
+  (D13 amendment, D17) and the service never writes key material to disk.
+  Fail-fast sanity: if the bucket already holds records the supplied first
+  key cannot open, refuse to serve — a mis-supplied seed must not
+  double-seal a bucket. No migration tooling from the file keystore:
+  milestone 1 shipped unreleased with no external consumers, so the file
+  backend retires by deletion, not conversion [judgment].
 - The registry stays a local strict-decoded JSON file in M3: it is declared
   configuration, not secret material — moving it to KV is a later
   convenience, not part of this milestone (constitution III).
@@ -145,9 +171,10 @@ Realizing D10 + D13, proven mechanically in journey 0004 [measured]:
 
 - NATS connection: a creds file (the service's own bypass lane, D12) or a
   NATS context; URL and creds path.
-- Paths: `first-key.xk`, `service.xk`, registry file, all defaulting beside
-  the data dir.
-- Bucket name; subject prefix fixed at `soulidentity.v1` (a deployment
+- The two xkey seeds: one environment variable each (flag accepted), per
+  D13's amendment and D17; operator keygen tooling mints them.
+- The registry file path.
+- Bucket name; subject prefix fixed at `soulidentity` (a deployment
   needing isolation runs its own account — subjects are account-local).
 
 ## Audit

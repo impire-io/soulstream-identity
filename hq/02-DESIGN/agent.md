@@ -347,6 +347,23 @@ bucket re-sealing — even while M3 ships without automating it.
 read-only or secretless hosts (recorded as an issue) re-opens the
 keychain/KMS rows as that class's home.
 
+*Amended 2026-07-28 at design review (journey 0006): the home moves from a
+`0600` file the service writes to **deployment-supplied configuration** — an
+environment variable (flag accepted) carrying the `SX…` seed.* Custody goes
+to the deployment's secret manager (container secret injection, systemd
+credentials), and read-only/secretless hosts — the class the reversal
+condition above named — are served without re-opening keychain/KMS. The
+trust analysis carries over: a process environment is readable by the
+service user and root, the same principal set as the file
+[mechanism-argument]; the flag form is weaker — argv is world-visible in
+the process table on common platforms — so the env var is the documented
+default and the flag a convenience, stated as such. The bootstrap reshapes:
+the operator mints the seed once (keygen tooling) into the secret store —
+the seed now transits the same distribution channel the deployment already
+trusts with `service.creds` — and the service writes no key material to
+disk, ever. Journey 0004's measurements stand: seal/unseal mechanics and
+ciphertext-only storage are unaffected by how the seed enters the process.
+
 ## Milestone 1 — the walking skeleton
 
 - `internal/vault` — file-backed keystore: NATS nkey seeds (account signing
