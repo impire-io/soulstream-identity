@@ -13,7 +13,12 @@ user* with real per-user credentials, and what keeps key custody auditable
 when personas run on infrastructure their operator does not sit in front of.
 
 The design — the decisions and their reasoning — lives in
-[DESIGN.md](DESIGN.md).
+[hq/02-DESIGN/agent.md](hq/02-DESIGN/agent.md). **How this project is run
+lives in [hq/](hq/README.md)** — vision and constitution
+([hq/00-GENESIS/](hq/00-GENESIS/README.md)), the roadmap
+([hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md)), and the
+journey log ([hq/04-JOURNEY/](hq/04-JOURNEY/README.md)); agents start at
+[AGENTS.md](AGENTS.md).
 
 ## Quick start
 
@@ -57,8 +62,9 @@ export exists solely as an explicit, named custody escape.
 Milestone 1 — walking skeleton. Local socket agent, file vault, identity
 registry, mint-from-scoped-signing-keys, NATS nonce oracle, proven end to end
 against an embedded NATS server in operator mode. See
-[DESIGN.md](DESIGN.md) for the ladder this grows along (TCP + caller auth,
-auth callout, attestation issuance, sealing keys).
+[hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for the
+ladder this grows along (TCP + caller auth, auth callout, attestation
+issuance, sealing keys).
 
 ## License
 

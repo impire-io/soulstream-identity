@@ -1,7 +1,7 @@
 // Package mint issues NATS user JWTs from account signing keys held in the
 // vault. The user key is generated inside the vault on first mint and reused
 // after; permissions are left to the signing key's scope, so the server — not
-// the minter — decides what the user may do (DESIGN.md D4, D5).
+// the minter — decides what the user may do (hq/02-DESIGN/agent.md D4, D5).
 package mint
 
 import (

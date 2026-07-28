@@ -1,6 +1,6 @@
 // Package registry is the identity ledger: which (account, user) exists, which
 // personas it may act as, and which vault role mints its credentials.
-// Identities are declared, never inferred (DESIGN.md D2); the act-as list is
+// Identities are declared, never inferred (hq/02-DESIGN/agent.md D2); the act-as list is
 // the runtime shadow of Soulstream's operated_by claim (D6).
 package registry
 

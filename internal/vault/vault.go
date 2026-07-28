@@ -2,7 +2,7 @@
 // seeds never. Every secret lives in its own 0600 file under a 0700 directory;
 // the API surface above this package exposes public keys and signing operations
 // only — the sole exception is ExportSeed, the explicit custody escape used by
-// credential export (DESIGN.md D7).
+// credential export (hq/02-DESIGN/agent.md D7).
 package vault
 
 import (
@@ -24,7 +24,7 @@ type Kind string
 
 const (
 	// KindNATSAccountSigningKey is an account (signing) nkey seed ("SA…"): mints
-	// user JWTs. Scoped signing keys are the recommended shape (DESIGN.md D5).
+	// user JWTs. Scoped signing keys are the recommended shape (hq/02-DESIGN/agent.md D5).
 	KindNATSAccountSigningKey Kind = "nats-account-signing-key"
 	// KindNATSUserKey is a user nkey seed ("SU…"): signs NATS connection nonces.
 	KindNATSUserKey Kind = "nats-user-key"
@@ -239,7 +239,7 @@ func (v *Vault) List() ([]Entry, error) {
 }
 
 // SignNonce signs a NATS connection nonce with an nkey entry (challenge-
-// response authentication; DESIGN.md D1). Returns the raw signature bytes the
+// response authentication; hq/02-DESIGN/agent.md D1). Returns the raw signature bytes the
 // nats client protocol expects.
 func (v *Vault) SignNonce(name string, nonce []byte) ([]byte, error) {
 	s, err := v.load(name)
@@ -295,7 +295,7 @@ func (v *Vault) KeyPair(name string) (nkeys.KeyPair, error) {
 	return kp, nil
 }
 
-// ExportSeed returns the raw secret: THE custody escape (DESIGN.md D7), used
+// ExportSeed returns the raw secret: THE custody escape (hq/02-DESIGN/agent.md D7), used
 // only by explicit credential export. Callers surface the export loudly.
 func (v *Vault) ExportSeed(name string) (string, error) {
 	s, err := v.load(name)

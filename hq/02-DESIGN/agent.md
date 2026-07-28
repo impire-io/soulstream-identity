@@ -1,9 +1,10 @@
-# SoulIdentity — design
+# SoulIdentity — the agent design
 
 *An ssh-agent for personas: an identity vault, a signing oracle, and a NATS
-credential minter for the Soulstream ecosystem. Status: milestone 1 (walking
-skeleton). Decisions below are numbered D1–D10; each records its reasoning so
-it can be re-argued honestly later.*
+credential minter for the Soulstream ecosystem. Decisions below are numbered
+D1–D10; each records its reasoning so it can be re-argued honestly later.
+Milestone status lives in
+[`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## What it is
 

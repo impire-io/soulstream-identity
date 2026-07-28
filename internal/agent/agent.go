@@ -1,6 +1,6 @@
 // Package agent serves the vault and registry over a Unix socket: HTTP+JSON,
 // ssh-agent trust model — socket mode 0600, the OS user is the principal
-// (DESIGN.md D8). Every operation is audit-logged; secrets are write-only
+// (hq/02-DESIGN/agent.md D8). Every operation is audit-logged; secrets are write-only
 // through this surface, with credential export as the one named escape.
 package agent
 
@@ -86,7 +86,7 @@ type mintResponse struct {
 	JWT           string `json:"jwt"`
 	UserPublicKey string `json:"user_public_key"`
 	// Creds is present only when the caller explicitly asked for the custody
-	// escape (DESIGN.md D7).
+	// escape (hq/02-DESIGN/agent.md D7).
 	Creds string `json:"creds,omitempty"`
 }
 

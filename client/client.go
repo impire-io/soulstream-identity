@@ -1,7 +1,7 @@
 // Package client talks to a SoulIdentity agent over its Unix socket and wires
 // the agent's oracles into consumers — most importantly nats.go's credential
 // callbacks, so a NATS connection authenticates with a key that never leaves
-// the vault (DESIGN.md D1).
+// the vault (hq/02-DESIGN/agent.md D1).
 //
 // The types here mirror the agent's JSON wire contract; this package is the
 // contract's canonical consumer-side definition.
@@ -215,7 +215,7 @@ func (c *Client) Mint(account, user string) (MintResult, error) {
 	return out, err
 }
 
-// MintCreds is the explicit custody escape (DESIGN.md D7): mint plus a creds
+// MintCreds is the explicit custody escape (hq/02-DESIGN/agent.md D7): mint plus a creds
 // file whose seed leaves the vault. For external tools only.
 func (c *Client) MintCreds(account, user string) (MintResult, error) {
 	var out MintResult

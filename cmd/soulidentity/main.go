@@ -37,7 +37,7 @@ Usage:
 Kinds: nats-account-signing-key | nats-user-key | persona-signing-key
 Defaults: data dir <user-config-dir>/soulidentity, socket <data>/agent.sock.
 --creds prints a creds file: the seed LEAVES the vault — an explicit custody
-escape for external tools, not the normal path (see DESIGN.md D7).
+escape for external tools, not the normal path (see hq/02-DESIGN/agent.md D7).
 `
 
 func main() {

@@ -1,0 +1,3 @@
+// Package hqlint is the structural lint for the hq/ headquarters layout. It
+// contains only tests; it rides the standard quality gate via go test ./...
+package hqlint
