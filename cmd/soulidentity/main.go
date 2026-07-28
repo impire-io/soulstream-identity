@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -24,6 +25,7 @@ import (
 	"github.com/synadia-io/orbit.go/natscontext"
 
 	"github.com/impire-io/soulidentity/client"
+	"github.com/impire-io/soulidentity/internal/callout"
 	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
@@ -34,6 +36,8 @@ const usage = `soulidentity — the identity plane, served over NATS
 
 Usage:
   soulidentity serve    [conn] [--registry PATH] [--bucket NAME]     run the service
+                        [--callout-creds F | --callout-context C]    …as callout issuer (M4):
+                        [--auth-key NAME] [--token-bucket NAME] [--callout-ttl DUR]
   soulidentity keygen                              mint an xkey seed (seed on stdout)
   soulidentity status   [conn]                     probe the service
   soulidentity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
@@ -41,14 +45,21 @@ Usage:
   soulidentity identity add [conn] --as A/U --account A --user U [--personas p1,p2] [--role R] [--admin]
   soulidentity identity ls  [conn] --as A/U
   soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
+  soulidentity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
+  soulidentity token ls     [conn] --as A/U
+  soulidentity token revoke [conn] --as A/U --digest D
+  soulidentity sentinel     [conn] --as A/U        mint the sentinel creds (stdout)
   soulidentity version
 
 Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
 --as is the principal (<account-public-key>/<user>) the connection is
 authenticated as; the server refuses mismatched prefixes (D15).
-Serve reads its xkey seeds from SOULIDENTITY_FIRST_KEY and
-SOULIDENTITY_SURFACE_KEY; the --first-key/--surface-key flags are accepted
-but argv is visible in the process table — prefer the environment (D13).
+Serve reads its xkey seeds from SOULIDENTITY_FIRST_KEY,
+SOULIDENTITY_SURFACE_KEY and (callout, optional) SOULIDENTITY_CALLOUT_KEY;
+the matching flags are accepted but argv is visible in the process table —
+prefer the environment (D13). The callout connection (--callout-creds /
+--callout-context) authenticates in the AUTH account (D21); its presence
+enables the issuer and the token/sentinel ops.
 Kinds: nats-account-signing-key | nats-user-key | persona-signing-key
 --creds prints a creds file: the seed LEAVES the vault — the explicit custody
 escape (hq/02-DESIGN/agent.md D7) and the way onto the bypass lane (D12).
@@ -78,6 +89,10 @@ func run(args []string, out, errw io.Writer) int {
 		err = cmdIdentity(rest, out)
 	case "mint":
 		err = cmdMint(rest, out)
+	case "token":
+		err = cmdToken(rest, out)
+	case "sentinel":
+		err = cmdSentinel(rest, out)
 	case "version":
 		fmt.Fprintln(out, version.Version)
 	case "help", "-h", "--help":
@@ -182,6 +197,13 @@ func cmdServe(args []string, errw io.Writer) error {
 	bucket := fs.String("bucket", "SOULIDENTITY_VAULT", "KV bucket holding the sealed vault")
 	firstKey := fs.String("first-key", "", "vault first key seed (SX…); prefer SOULIDENTITY_FIRST_KEY")
 	surfaceKey := fs.String("surface-key", "", "surface xkey seed (SX…); prefer SOULIDENTITY_SURFACE_KEY")
+	calloutCreds := fs.String("callout-creds", "", "creds file for the AUTH-account callout connection (enables the issuer, D21)")
+	calloutContext := fs.String("callout-context", "", "NATS CLI context for the AUTH-account callout connection")
+	authKey := fs.String("auth-key", "auth/issuer", "vault name of the AUTH account signing key (callout responses, sentinels)")
+	authAccount := fs.String("auth-account", "", "AUTH account public key (A…) — sentinels name it as issuer_account")
+	tokenBucket := fs.String("token-bucket", "SOULIDENTITY_TOKENS", "KV bucket holding API token digests")
+	calloutTTL := fs.Duration("callout-ttl", 15*time.Minute, "issued-JWT lifetime — the revocation propagation bound (D22)")
+	calloutKey := fs.String("callout-key", "", "callout xkey seed (SX…); prefer SOULIDENTITY_CALLOUT_KEY")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -192,6 +214,12 @@ func cmdServe(args []string, errw io.Writer) error {
 	surfaceSeed, err := seedFromFlagOrEnv(*surfaceKey, "SOULIDENTITY_SURFACE_KEY")
 	if err != nil {
 		return err
+	}
+	// The callout xkey is optional: only deployments whose AUTH account
+	// declares authorization.xkey need it.
+	calloutSeed := *calloutKey
+	if calloutSeed == "" {
+		calloutSeed = os.Getenv("SOULIDENTITY_CALLOUT_KEY")
 	}
 
 	nc, err := cf.connect()
@@ -223,7 +251,41 @@ func cmdServe(args []string, errw io.Writer) error {
 		return err
 	}
 	log := slog.New(slog.NewTextHandler(errw, nil))
-	svc, err := service.New(v, reg, surfaceSeed, log)
+
+	// The callout half: a second connection, authenticated in the AUTH
+	// account (D21); its presence enables the issuer and the token ops.
+	var svcOpts []service.Option
+	var ncCallout *nats.Conn
+	if *calloutCreds != "" || *calloutContext != "" {
+		if *authAccount == "" {
+			return errors.New("callout needs --auth-account (the AUTH account public key)")
+		}
+		tokensKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: *tokenBucket})
+		if err != nil {
+			return fmt.Errorf("kv bucket %s: %w", *tokenBucket, err)
+		}
+		store := callout.NewKVTokenStore(tokensKV)
+		svcOpts = append(svcOpts, service.WithCallout(store, *authKey, *authAccount))
+
+		calloutCF := connFlags{context: calloutContext, url: cf.url, creds: calloutCreds}
+		ncCallout, err = calloutCF.connect()
+		if err != nil {
+			return fmt.Errorf("callout connection: %w", err)
+		}
+		defer ncCallout.Close()
+		issuer, err := callout.NewIssuer(v, reg, store, *authKey, *calloutTTL, calloutSeed, log)
+		if err != nil {
+			return err
+		}
+		if _, err := issuer.Start(ncCallout); err != nil {
+			return err
+		}
+		log.Info("callout issuer serving", "subject", callout.Subject,
+			"token_bucket", *tokenBucket, "ttl", calloutTTL.String(),
+			"sealed_requests", calloutSeed != "")
+	}
+
+	svc, err := service.New(v, reg, surfaceSeed, log, svcOpts...)
 	if err != nil {
 		return err
 	}
@@ -235,7 +297,102 @@ func cmdServe(args []string, errw io.Writer) error {
 		"registry", *registryPath, "version", version.Version)
 	<-ctx.Done()
 	_ = sub.Drain()
+	if ncCallout != nil {
+		_ = ncCallout.Drain()
+	}
 	return nc.Drain()
+}
+
+func cmdToken(args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("token needs a subcommand: create | ls | revoke")
+	}
+	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("token create", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		account := fs.String("account", "", "identity's account public key (A…)")
+		user := fs.String("user", "", "identity's user name")
+		label := fs.String("label", "", "label for the audit trail")
+		ttl := fs.Duration("ttl", 0, "token lifetime (0 = no expiry)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		res, err := c.CreateToken(*account, *user, *label, *ttl)
+		if err != nil {
+			return err
+		}
+		// The plaintext appears once, on stdout; the digest is the handle.
+		fmt.Fprintln(out, res.Token)
+		fmt.Fprintf(os.Stderr, "digest (revocation handle): %s\n", res.Digest)
+		return nil
+	case "ls":
+		fs := flag.NewFlagSet("token ls", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		tokens, err := c.Tokens()
+		if err != nil {
+			return err
+		}
+		for _, tk := range tokens {
+			fmt.Fprintf(out, "%s\t%s/%s\t%s\t%s\n", tk.Digest, tk.Account, tk.User, tk.Label, tk.Expires)
+		}
+		return nil
+	case "revoke":
+		fs := flag.NewFlagSet("token revoke", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		digest := fs.String("digest", "", "the token's digest handle (from create or ls)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		if err := c.RevokeToken(*digest); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "revoked %s (open connections end at JWT expiry)\n", *digest)
+		return nil
+	default:
+		return fmt.Errorf("unknown token subcommand %q", args[0])
+	}
+}
+
+func cmdSentinel(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("sentinel", flag.ContinueOnError)
+	cf := addConnFlags(fs)
+	as := asFlag(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	c, done, err := newClient(cf, *as)
+	if err != nil {
+		return err
+	}
+	defer done()
+	res, err := c.MintSentinel()
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(out, res.Creds)
+	return nil
 }
 
 func cmdKeygen(out, errw io.Writer) error {

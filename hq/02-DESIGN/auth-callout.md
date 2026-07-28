@@ -26,6 +26,13 @@ deny-all makes it a dead credential should callout ever be disabled.
 Sentinel distribution therefore needs no custody story; the external
 credential is the only secret the client carries.
 
+*As built (M4, journey 0010):* operators mint the sentinel through the
+admin-gated `sentinel.mint` op — the AUTH signing key never leaves the
+vault to do it. One protocol fact the build measured: a sentinel signed by
+a *signing key* of AUTH must carry `issuer_account` naming the AUTH
+account, or the server refuses the connection before callout ever fires —
+which is why the service configuration carries the AUTH account public key.
+
 **Reversal condition** (from the graduation): a consumer client class that
 cannot set the token connect option alongside credentials (observable: a
 consumer blocked at connection, recorded as an issue) re-opens the carrier
@@ -54,7 +61,10 @@ vault (D5). Three protocol facts shape the implementation [measured]:
 
 Attribution: the external identity is written into the issued JWT's name
 and the issuer's audit log, alongside the client host — the M4 gate's
-attributability requirement is met by construction [measured].
+attributability requirement is met by construction [measured]. Wire-facing
+refusal messages are deliberately generic ("credential rejected") — the
+reasons live only in the audit log, so a probing client learns nothing
+about which tokens exist.
 
 ## D21 — The AUTH account topology
 
@@ -65,11 +75,20 @@ target accounts the issuer may place users into — listed explicitly, never
 `*`), and `authorization.xkey` (the callout xkey, so authorization
 requests are sealed to the issuer — the same curve-key machinery as
 D16/D17, deployment-supplied like the other seeds)
-[mechanism-argument; the xkey leg is unspiked and is proven in the M4
-gate]. The sentinel user lives in this account; issued users land in the
-target accounts. SoulIdentity thus holds for M4: the AUTH account seed,
-the callout xkey seed, and the role keys it already had — no new key
-class, one new account.
+[measured in the M4 gate: the e2e runs with `authorization.xkey` set, the
+request arrives sealed with the server's public curve key in the
+`Nats-Server-Xkey` header, and the response is sealed back]. The sentinel
+user lives in this account; issued users land in the target accounts.
+
+*As built (M4, journey 0010):* the service holds **two connections** — the
+sealed surface on its own account, the issuer subscription on the AUTH
+account (`--callout-creds`/`--callout-context`; its presence enables the
+issuer and the token/sentinel ops). SoulIdentity holds an AUTH **signing
+key** in the vault (not the master; `--auth-key` names it, and
+`--auth-account` carries the account public key the sentinel declares),
+the optional callout xkey seed (`SOULIDENTITY_CALLOUT_KEY`), the token
+bucket beside the vault bucket on the service's own account, and the role
+keys it already had — no new key class, one new account.
 
 ## D22 — The mapping shape: validate, authorize, mint — policy never in the credential store
 
@@ -101,8 +120,15 @@ facts, measured: **revocation** (deleting the token record) refuses the
 next connection attempt, and the **issued-JWT TTL is the revocation
 propagation bound** — at expiry the server disconnects, the client's
 reconnect re-fires callout, and the revoked token is refused. The TTL is
-therefore a deliberate M4 configuration knob whose price is one callout
-round-trip per TTL per open connection [measured].
+therefore a deliberate M4 configuration knob (`--callout-ttl`, default
+15m) whose price is one callout round-trip per TTL per open connection
+[measured].
+
+*As built (M4, journey 0010):* tokens are managed over the sealed surface
+— `tokens.create` (which refuses identities the registry does not declare:
+a token that could only ever be refused is a mistake caught at issuance),
+`tokens.list`, `tokens.revoke` — all admin-gated (D18); the plaintext
+appears exactly once, in the create response.
 
 **Reversal condition** (inherited from D12's watch): any policy field —
 permission, persona, role — proposed for the token record schema, or a

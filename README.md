@@ -79,17 +79,18 @@ custody escape.
 
 ## Status
 
-Milestone 3 — the NATS-native rebuild. The sealed service surface, the vault
-on NATS KV with envelope encryption at rest, act-as enforced against the
-server-proven caller, and an audit log that names real principals — proven
-end to end against an embedded NATS server in operator mode (unauthorized
-act-as refused, wire and store ciphertext-only, cross-prefix requests
-refused by the server itself). The milestone-1 socket agent, file keystore,
-and nonce oracle are retired. See
+Milestones 3 and 4 — the NATS-native service and the auth-callout front
+door. The sealed service surface on the caller's own subject prefix, the
+vault on NATS KV with envelope encryption at rest, act-as enforced against
+the server-proven caller — and SoulIdentity as the callout issuer: an
+external client brings a public sentinel creds file plus an API token, and
+receives a TTL-bounded scoped identity, fully attributable in the audit
+log, with revocation propagating at the JWT's expiry. Both milestones are
+proven end to end against embedded NATS servers in operator mode; creds-file
+connections stay natively verified with the issuer out of the path. See
 [hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for what
-comes next (auth callout as the front door with claims-derived
-authorization, then consumers wiring in; attestation issuance, sealing
-keys).
+comes next (consumers wiring in; Entra/OIDC as callout configuration;
+attestation issuance, sealing keys).
 
 ## License
 

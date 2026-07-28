@@ -279,3 +279,63 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 func UserKeyName(account, user string) string {
 	return "user/" + account + "/" + user
 }
+
+// TokenEntry is a stored API token as the service shows it: the digest
+// handle and the declared identity — never the plaintext.
+type TokenEntry struct {
+	Digest  string `json:"digest"`
+	Account string `json:"account"`
+	User    string `json:"user"`
+	Label   string `json:"label,omitempty"`
+	Expires string `json:"expires,omitempty"`
+}
+
+// TokenResult is a freshly issued API token. The plaintext appears here and
+// nowhere else — the service stores only the digest.
+type TokenResult struct {
+	Token  string `json:"token"`
+	Digest string `json:"digest"`
+}
+
+// SentinelResult is a minted sentinel: a bearer, deny-all user JWT (and its
+// creds rendering) — public by design (hq/02-DESIGN/auth-callout.md D19).
+type SentinelResult struct {
+	JWT   string `json:"jwt"`
+	Creds string `json:"creds"`
+}
+
+// CreateToken issues an API token for the registered identity; ttl of zero
+// means no expiry. Admin identities only.
+func (c *Client) CreateToken(account, user, label string, ttl time.Duration) (TokenResult, error) {
+	var out TokenResult
+	err := c.call("tokens.create", map[string]any{
+		"account": account, "user": user, "label": label,
+		"ttl_seconds": int64(ttl / time.Second),
+	}, &out)
+	return out, err
+}
+
+// Tokens lists the stored API tokens (digests and identities, never
+// plaintext). Admin identities only.
+func (c *Client) Tokens() ([]TokenEntry, error) {
+	var out struct {
+		Tokens []TokenEntry `json:"tokens"`
+	}
+	err := c.call("tokens.list", struct{}{}, &out)
+	return out.Tokens, err
+}
+
+// RevokeToken deletes a token by its digest handle: the next connection
+// attempt is refused; open connections end at their JWT's expiry. Admin
+// identities only.
+func (c *Client) RevokeToken(digest string) error {
+	return c.call("tokens.revoke", map[string]string{"digest": digest}, nil)
+}
+
+// MintSentinel mints the deployment's sentinel credential. Admin identities
+// only.
+func (c *Client) MintSentinel() (SentinelResult, error) {
+	var out SentinelResult
+	err := c.call("sentinel.mint", struct{}{}, &out)
+	return out, err
+}

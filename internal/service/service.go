@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/impire-io/soulidentity/internal/callout"
 	"github.com/impire-io/soulidentity/internal/mint"
 	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
@@ -38,11 +39,35 @@ type Service struct {
 	surface    nkeys.KeyPair
 	surfacePub string
 	log        *slog.Logger
+
+	// The callout half (hq/02-DESIGN/auth-callout.md): the token store the
+	// tokens.* ops manage, the vault name of the AUTH signing key
+	// sentinel.mint signs with, and the AUTH account public key the sentinel
+	// declares as issuer_account (a signing-key-signed user JWT must name
+	// its account or the server refuses it before callout ever fires).
+	// Nil/empty = those ops refuse.
+	tokens      callout.Store
+	authKeyName string
+	authAccount string
+}
+
+// Option configures a Service.
+type Option func(*Service)
+
+// WithCallout enables the token-management and sentinel ops: tokens live in
+// store, authKeyName is the vault name of the AUTH account signing key (D21)
+// that signs sentinels, and authAccount is the AUTH account's public key.
+func WithCallout(store callout.Store, authKeyName, authAccount string) Option {
+	return func(s *Service) {
+		s.tokens = store
+		s.authKeyName = authKeyName
+		s.authAccount = authAccount
+	}
 }
 
 // New builds the service around its surface key ("SX…" seed, deployment-
 // supplied — D17). A nil logger logs to a discarding handler.
-func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Logger) (*Service, error) {
+func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Logger, opts ...Option) (*Service, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -54,7 +79,11 @@ func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Log
 	if err != nil {
 		return nil, fmt.Errorf("service: surface key public half: %w", err)
 	}
-	return &Service{vault: v, reg: r, surface: kp, surfacePub: pub, log: log}, nil
+	s := &Service{vault: v, reg: r, surface: kp, surfacePub: pub, log: log}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 // Start subscribes the service to its subject space on nc.
@@ -293,6 +322,9 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		s.allow(account, user, op, "target_account", req.Account, "target_user", req.User,
 			"user_key", res.UserPublicKey)
 		return resp, nil
+
+	case "tokens.create", "tokens.list", "tokens.revoke", "sentinel.mint":
+		return s.dispatchCallout(account, user, op, body)
 
 	default:
 		return nil, fmt.Errorf("service: unknown op %q", op)

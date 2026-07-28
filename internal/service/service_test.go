@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
+	"github.com/impire-io/soulidentity/internal/callout"
 	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
@@ -215,6 +216,94 @@ func TestMintSelfOrAdmin(t *testing.T) {
 	}
 	if !strings.Contains(forOther.Creds, "-----BEGIN USER NKEY SEED-----") {
 		t.Fatal("creds escape did not render a creds file")
+	}
+}
+
+func TestTokenAndSentinelOps(t *testing.T) {
+	s, acc := harness(t)
+	// Without callout configuration the ops refuse, even for admins.
+	if err := call(t, s, acc, "ops", "tokens.list", struct{}{}, nil); err == nil ||
+		!strings.Contains(err.Error(), "callout") {
+		t.Fatalf("token op without callout config: %v", err)
+	}
+
+	authKP, _ := nkeys.CreateAccount()
+	authSeed, _ := authKP.Seed()
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "auth/issuer", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(authSeed),
+	}, nil); err != nil {
+		t.Fatalf("import auth key: %v", err)
+	}
+	store := callout.NewMemTokenStore()
+	authAccKP, _ := nkeys.CreateAccount()
+	authAccPub, _ := authAccKP.PublicKey()
+	WithCallout(store, "auth/issuer", authAccPub)(s)
+
+	// Admin-gated like the rest of management.
+	if err := call(t, s, acc, "daan", "tokens.list", struct{}{}, nil); err == nil ||
+		!strings.Contains(err.Error(), "admin") {
+		t.Fatalf("non-admin token op: %v", err)
+	}
+
+	// Issuance refuses unregistered identities, then works for daan.
+	if err := call(t, s, acc, "ops", "tokens.create",
+		tokenCreateRequest{Account: acc, User: "ghost"}, nil); err == nil {
+		t.Fatal("token created for an unregistered identity")
+	}
+	var created tokenCreateResponse
+	if err := call(t, s, acc, "ops", "tokens.create",
+		tokenCreateRequest{Account: acc, User: "daan", Label: "laptop"}, &created); err != nil {
+		t.Fatalf("tokens.create: %v", err)
+	}
+	if !strings.HasPrefix(created.Token, callout.TokenPrefix) || created.Digest == "" {
+		t.Fatalf("issuance shape: %+v", created)
+	}
+	if callout.Digest(created.Token) != created.Digest {
+		t.Fatal("returned digest does not match the token")
+	}
+	if _, ok, _ := store.Get(created.Digest); !ok {
+		t.Fatal("record not stored")
+	}
+
+	var listed tokensResponse
+	if err := call(t, s, acc, "ops", "tokens.list", struct{}{}, &listed); err != nil {
+		t.Fatalf("tokens.list: %v", err)
+	}
+	if len(listed.Tokens) != 1 || listed.Tokens[0].Label != "laptop" {
+		t.Fatalf("list: %+v", listed.Tokens)
+	}
+	for _, e := range listed.Tokens {
+		if strings.Contains(e.Digest, callout.TokenPrefix) {
+			t.Fatal("a plaintext token leaked into the listing")
+		}
+	}
+
+	if err := call(t, s, acc, "ops", "tokens.revoke",
+		tokenRevokeRequest{Digest: created.Digest}, nil); err != nil {
+		t.Fatalf("tokens.revoke: %v", err)
+	}
+	if _, ok, _ := store.Get(created.Digest); ok {
+		t.Fatal("record survived revocation")
+	}
+
+	// The sentinel: bearer, deny-all, signed by the AUTH key, creds included.
+	var sentinel sentinelResponse
+	if err := call(t, s, acc, "ops", "sentinel.mint", struct{}{}, &sentinel); err != nil {
+		t.Fatalf("sentinel.mint: %v", err)
+	}
+	uc, err := jwt.DecodeUserClaims(sentinel.JWT)
+	if err != nil {
+		t.Fatalf("sentinel does not decode: %v", err)
+	}
+	authPub, _ := authKP.PublicKey()
+	if !uc.BearerToken || uc.Issuer != authPub {
+		t.Fatalf("sentinel shape: bearer=%v issuer=%q", uc.BearerToken, uc.Issuer)
+	}
+	if len(uc.Pub.Deny) == 0 || len(uc.Sub.Deny) == 0 {
+		t.Fatal("sentinel is not deny-all")
+	}
+	if !strings.Contains(sentinel.Creds, "-----BEGIN NATS USER JWT-----") {
+		t.Fatal("sentinel creds not rendered")
 	}
 }
 

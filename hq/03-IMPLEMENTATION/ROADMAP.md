@@ -6,6 +6,19 @@ gate.*
 
 ## Where we are (2026-07-28)
 
+**Milestone 4 — auth callout, the front door — shipped 2026-07-28**
+([journey 0010](../04-JOURNEY/0010-m4-auth-callout-ships.md), design
+[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), D19–D22,
+researched same-day in journeys 0008–0009): SoulIdentity as the callout
+issuer on a dedicated AUTH account — sentinel + API token in,
+TTL-bounded scoped JWT for the server-assigned key out, token management
+and sentinel minting as admin-gated surface ops. Gate met [measured]:
+attribution in the audit, bypass lane untouched by the issuer, invalid and
+revoked tokens refused, xkey-sealed callout requests proven. Next in the
+execution order: **M2 — consumers wire in**. Entra/OIDC is validator
+configuration on the D22 interface when it comes; NGS remains an open
+research question blocked on operator portal access.
+
 **Milestone 3 — the NATS-native rebuild — shipped 2026-07-28**
 ([journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md), design
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), D14–D18):
@@ -69,19 +82,21 @@ arrive over the NATS surface).
    to an account-privileged observer; the KV store ciphertext-only at rest
    against a plaintext positive control; a cross-prefix request refused by
    the server's own permission enforcement.
-4. **M4 — auth callout, the front door.** SoulIdentity as the NATS
-   auth-callout issuer with pluggable authn backends (KV of API tokens
-   first; Entra/OIDC next), issuing ephemeral JWTs for the client's own key
-   — authorization registry-declared or claims-derived from the presented
-   token (D2), the creds-file bypass drawn in callout config (D12). Gate: a
-   connection authenticated by an external credential, with server-enforced
-   permissions and the external identity attributable in the audit log, and
-   a creds-file connection verified natively with SoulIdentity out of the
-   path [measured], against self-hosted NATS. The design is complete for
-   the API-token backend (D19–D22,
-   [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)); the
-   self-hosted build is unblocked. The NGS answer (below) gates promising
-   callout on NGS, not this build.
+4. ✅ **M4 — auth callout, the front door** (shipped 2026-07-28,
+   [journey 0010](../04-JOURNEY/0010-m4-auth-callout-ships.md)).
+   SoulIdentity as the NATS auth-callout issuer, API-token backend first
+   (Entra/OIDC later as validator config on the same D22 interface),
+   issuing TTL-bounded ephemeral JWTs for the server-assigned user key —
+   authorization from the registry row, the creds-file bypass drawn in
+   callout config (D12). Realized the design in
+   [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md)
+   (D19–D22). Gate met [measured] in the e2e proof: an external-credential
+   connection admitted with server-enforced permissions and the identity
+   attributable in the audit log; every creds-file connection verified
+   natively with zero callout decisions — SoulIdentity out of the path;
+   invalid and revoked tokens refused; callout requests xkey-sealed both
+   ways. The NGS answer (below) gates promising callout on NGS, not this
+   build.
 5. **M5 — attestation issuance.** Soulstream `operated_by` attestation tokens
    issued from the vault (D6's static half). Gated on demand from the
    Soulstream side.

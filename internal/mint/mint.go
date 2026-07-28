@@ -7,8 +7,10 @@ package mint
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
@@ -25,52 +27,81 @@ type Result struct {
 	UserPublicKey string `json:"user_public_key"`
 }
 
-// Mint issues a user JWT for the registered identity (account, user), signed
-// by the identity's role key. The claims carry issuer_account (membership is
-// declared, D2) and are scoped — permissions come from the signing key's
-// scope in the account JWT, enforced by the server. A mis-bound role key
-// yields a JWT the server rejects at connection time; that is the verifier of
-// record (D3).
-func Mint(v *vault.Vault, reg *registry.Registry, account, user string) (Result, error) {
+// roleKey resolves the registered identity's role to its vault signing key.
+func roleKey(v *vault.Vault, reg *registry.Registry, account, user string) (nkeys.KeyPair, error) {
 	id, ok, err := reg.Get(account, user)
 	if err != nil {
-		return Result{}, err
+		return nil, err
 	}
 	if !ok {
-		return Result{}, fmt.Errorf("mint: identity %s/%s is not registered", account, user)
+		return nil, fmt.Errorf("mint: identity %s/%s is not registered", account, user)
 	}
 	if id.Role == "" {
-		return Result{}, fmt.Errorf("mint: identity %s/%s has no role — register it with the vault name of an account signing key", account, user)
+		return nil, fmt.Errorf("mint: identity %s/%s has no role — register it with the vault name of an account signing key", account, user)
 	}
 	role, err := v.Get(id.Role)
 	if err != nil {
-		return Result{}, fmt.Errorf("mint: role of %s/%s: %w", account, user, err)
+		return nil, fmt.Errorf("mint: role of %s/%s: %w", account, user, err)
 	}
 	if role.Kind != vault.KindNATSAccountSigningKey {
-		return Result{}, fmt.Errorf("mint: role key %s is %q, want %q", id.Role, role.Kind, vault.KindNATSAccountSigningKey)
+		return nil, fmt.Errorf("mint: role key %s is %q, want %q", id.Role, role.Kind, vault.KindNATSAccountSigningKey)
 	}
+	return v.KeyPair(id.Role)
+}
 
+// claims builds the scoped user claims every mint path shares: the JWT
+// carries no permissions of its own; the signing key's scope in the account
+// JWT is the whole policy (D5), enforced by the server. A mis-bound role key
+// yields a JWT the server rejects at connection time; that is the verifier
+// of record (D3).
+func claims(userPub, account, user string) *jwt.UserClaims {
+	uc := jwt.NewUserClaims(userPub)
+	uc.Name = user
+	uc.IssuerAccount = account // membership is declared (D2)
+	uc.SetScoped(true)
+	return uc
+}
+
+// Mint issues a durable user JWT for the registered identity (account, user)
+// with the user key generated inside the vault and reused across mints.
+func Mint(v *vault.Vault, reg *registry.Registry, account, user string) (Result, error) {
+	kp, err := roleKey(v, reg, account, user)
+	if err != nil {
+		return Result{}, err
+	}
 	uk, err := v.GenerateUserKey(UserKeyName(account, user))
 	if err != nil {
 		return Result{}, err
 	}
-
-	uc := jwt.NewUserClaims(uk.PublicKey)
-	uc.Name = user
-	uc.IssuerAccount = account
-	// Scoped: the user JWT carries no permissions of its own; the signing
-	// key's scope in the account JWT is the whole policy.
-	uc.SetScoped(true)
-
-	kp, err := v.KeyPair(id.Role)
-	if err != nil {
-		return Result{}, err
-	}
-	token, err := uc.Encode(kp)
+	token, err := claims(uk.PublicKey, account, user).Encode(kp)
 	if err != nil {
 		return Result{}, fmt.Errorf("mint: encode user JWT for %s/%s: %w", account, user, err)
 	}
 	return Result{JWT: token, UserPublicKey: uk.PublicKey}, nil
+}
+
+// ForKey issues an ephemeral scoped user JWT for a caller-provided user
+// public key — the auth-callout path (hq/02-DESIGN/auth-callout.md D20),
+// where the key is server-assigned and no vault key exists or is created.
+// ttl bounds the credential and is the revocation propagation bound (D22).
+func ForKey(v *vault.Vault, reg *registry.Registry, account, user, userPub string, ttl time.Duration) (string, error) {
+	if !nkeys.IsValidPublicUserKey(userPub) {
+		return "", fmt.Errorf("mint: %q is not a user public key", userPub)
+	}
+	if ttl <= 0 {
+		return "", errors.New("mint: an ephemeral mint needs a positive ttl")
+	}
+	kp, err := roleKey(v, reg, account, user)
+	if err != nil {
+		return "", err
+	}
+	uc := claims(userPub, account, user)
+	uc.Expires = time.Now().Add(ttl).Unix()
+	token, err := uc.Encode(kp)
+	if err != nil {
+		return "", fmt.Errorf("mint: encode ephemeral JWT for %s/%s: %w", account, user, err)
+	}
+	return token, nil
 }
 
 // ExportCreds renders a creds file (JWT + user seed) for external tools. This

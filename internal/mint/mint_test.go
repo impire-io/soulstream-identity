@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -99,6 +100,43 @@ func TestMintRefusals(t *testing.T) {
 	}
 	if _, err := Mint(v, reg, accPub, "roleless"); err == nil || !strings.Contains(err.Error(), "role") {
 		t.Fatalf("roleless mint error should name the role, got %v", err)
+	}
+}
+
+func TestMintForKeyIssuesEphemeralScopedJWT(t *testing.T) {
+	v, reg, accPub, askPub := harness(t)
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+
+	token, err := ForKey(v, reg, accPub, "daan", upub, time.Minute)
+	if err != nil {
+		t.Fatalf("MintForKey: %v", err)
+	}
+	uc, err := jwt.DecodeUserClaims(token)
+	if err != nil {
+		t.Fatalf("ephemeral JWT does not decode: %v", err)
+	}
+	if uc.Subject != upub {
+		t.Fatalf("subject %q is not the provided key %q", uc.Subject, upub)
+	}
+	if uc.Issuer != askPub || uc.IssuerAccount != accPub {
+		t.Fatalf("issuer chain wrong: %q / %q", uc.Issuer, uc.IssuerAccount)
+	}
+	if !uc.HasEmptyPermissions() {
+		t.Fatal("ephemeral JWT carries its own permissions — the scope must be the whole policy")
+	}
+	if uc.Expires == 0 || time.Unix(uc.Expires, 0).Before(time.Now()) {
+		t.Fatalf("ephemeral JWT must expire in the future, got %d", uc.Expires)
+	}
+
+	if _, err := ForKey(v, reg, accPub, "daan", "not-a-key", time.Minute); err == nil {
+		t.Fatal("bad public key accepted")
+	}
+	if _, err := ForKey(v, reg, accPub, "daan", upub, 0); err == nil {
+		t.Fatal("zero ttl accepted — an unbounded ephemeral credential")
+	}
+	if _, err := ForKey(v, reg, accPub, "ghost", upub, time.Minute); err == nil {
+		t.Fatal("minted for an unregistered identity")
 	}
 }
 
