@@ -74,12 +74,19 @@ arrive over the NATS surface).
    explicit creds escape. Realizes D1, D2, D4 (mint rung), D5, D7, D8, D10
    (file backend).
 2. **M2 — consumers wire in** (runs after M3/M4 since journey 0003). The
-   Soulstream `Signer` seam (soulstream feature 017) consumes `sign/record`
-   over the NATS surface; the remote MCP node connects per user by passing
-   each user's token through callout — the `NATSOption` socket seam it was
-   originally planned against is superseded. Gate: a Soulstream record
-   signed through the service verifies in the realm [measured]; the node
-   holds one pooled connection per user with no node-held creds. This
+   Soulstream `Signer` seam **landed 2026-07-29** (soulstream `017-signer-seam`,
+   its journey episode 0006): `identity.Signer { PublicKey() string;
+   Sign(canonical []byte) (string, error) }` — deliberately the exact shape of
+   this repo's `client.SignRecord(persona, canonical)`, deadline owned by the
+   implementation. The remote MCP node connects per user by passing each
+   user's token through callout — the `NATSOption` socket seam it was
+   originally planned against is superseded. **The wiring rule (cycle
+   guard)**: Go satisfies the seam structurally, so the adapter lives in the
+   *consumer* binary — this repo MUST NOT import soulstream, soulstream never
+   imports this repo, and consumers sit above both; a module cycle is legal
+   in Go but a versioning trap we simply never enter. Gate: a Soulstream
+   record signed through the service verifies in the realm [measured]; the
+   node holds one pooled connection per user with no node-held creds. This
    milestone lives mostly in the consuming repos; here it may add only what
    those consumers prove missing.
 3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
