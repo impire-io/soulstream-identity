@@ -276,6 +276,35 @@ func TestOwnerBindingOnPersonaKeys(t *testing.T) {
 	}
 }
 
+func TestGeneratePersonaKeyMaterializesOwnerBound(t *testing.T) {
+	v, _ := newTestVault(t)
+	accPub := accountPub(t)
+
+	a, err := v.GeneratePersonaKey("persona/daan", accPub, "daan")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if a.Kind != KindPersonaSigningKey || a.Account != accPub || a.User != "daan" || a.PublicKey == "" {
+		t.Fatalf("materialized entry: %+v", a)
+	}
+	// Idempotent for the same owner: the key is stable across touches.
+	b, err := v.GeneratePersonaKey("persona/daan", accPub, "daan")
+	if err != nil || b != a {
+		t.Fatalf("regenerate: %v, %+v != %+v", err, b, a)
+	}
+	// Another owner cannot take the name — first owner wins (D26's cost).
+	if _, err := v.GeneratePersonaKey("persona/daan", accountPub(t), "daan"); err == nil {
+		t.Fatal("a second owner materialized over an existing persona key")
+	}
+	// A name held by another kind refuses.
+	if _, err := v.Import("stray", KindNATSUserKey, userSeed(t), "", ""); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if _, err := v.GeneratePersonaKey("stray", accPub, "daan"); err == nil {
+		t.Fatal("materialized over a non-persona key")
+	}
+}
+
 func TestTeamForAccountResolvesByBinding(t *testing.T) {
 	v, _ := newTestVault(t)
 	accPub := accountPub(t)

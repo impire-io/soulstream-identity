@@ -52,10 +52,10 @@ soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
   --name acme --kind nats-account-signing-key --account AC...PUBKEY \
   --seed-file ./SA.nk
 
-# Declare daan's persona key, bound to its owner — one identity, one persona:
-soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
-  --name persona/daan --kind persona-signing-key \
-  --account AC...PUBKEY --user daan --seed-file ./daan-persona.nk
+# Nothing declares daan: users are ephemeral, admitted from the credential
+# they present, and daan's persona signing key MATERIALIZES inside the
+# vault on his first signature, owner-bound (D26). (Bring-your-own keys
+# can still be imported with --name persona/daan --user daan.)
 
 # Mint daan's creds (the explicit custody escape — self-custody onboarding);
 # the signing key resolves by the account's team binding:
@@ -64,15 +64,20 @@ soulidentity mint --creds-file ./ops.creds --as AC...PUBKEY/ops \
 ```
 
 Signing a Soulstream record from Go — the persona key never leaves the
-vault, and the key's owner binding decides who may sign with it. The bound
-signer satisfies soulstream's `identity.Signer` seam structurally (neither
-repo imports the other):
+vault (it never existed anywhere else: it materializes there on first
+touch), and the key's owner binding decides who may sign with it. The
+bound signer satisfies soulstream's `identity.Signer` seam structurally
+(neither repo imports the other), and readers resolve any persona's
+public key from the same service — the vault is the realm's key
+directory:
 
 ```go
 nc, _ := nats.Connect(url, nats.UserCredentials("daan.creds"))
 c := client.New(nc, "AC...PUBKEY", "daan")
-signer, _ := c.PersonaSigner("daan") // PublicKey() + Sign(canonical)
+signer, _ := c.PersonaSigner("daan") // first touch: the key materializes
 sig, _ := signer.Sign(canonicalBytes)
+
+pub, _ := reader.PersonaPublicKey("daan") // the directory read (D26)
 ```
 
 ## What it is not

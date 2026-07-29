@@ -260,6 +260,54 @@ per-op publish grammar, recorded as an issue — the NGS research is the
 first place this could surface) restores a service-side op gate keyed on
 declared configuration, as a new D-decision.
 
+## D26 — The identity plane is the key directory; persona keys materialize on first use
+
+*Decided 2026-07-29 at the operator's direction (journey 0015), the same
+day D25 landed — and correcting the first M2 proof, which had wired
+soulstream's persona directory (published per-user profiles) as the trust
+path: the registry pattern D25 deleted, resurrected one layer up.* The
+operator's model, stated plainly: identity truth lives in the deployment's
+IAM (Entra, or the operator's token issuance); **users are ephemeral,
+minted from the credential they present**; no per-user provisioning act
+may be required anywhere. Two consequences:
+
+- **The caller's own persona key materializes on first touch.** A persona
+  key is not identity — identity is the IAM's — it is a *capability
+  artifact*: the durable stamp that signs canonical records and outlives
+  every short-lived token, which is precisely what an OIDC access token
+  cannot provide (it carries no user key and expires within the hour;
+  soulstream's unsigned "testimony" needs no key at all — signing is the
+  opt-in for records that must prove themselves outside the connection).
+  So the key exists only if its owner ever signs: on the first
+  `sign.record` or `keys.public` naming `persona/<own user>`, the vault
+  generates the Ed25519 key in-process, owner-bound to the server-proven
+  principal — custody without possession from the first byte, the exact
+  pattern `GenerateUserKey` set for minted user keys. Import remains the
+  operator path for bring-your-own keys. When D9's sealed topics land,
+  the persona's X25519 sealing key follows this same materialization
+  pattern — decided now as the pattern, built then (constitution III).
+- **`keys.public` is the directory read, open to any authenticated
+  caller.** The vault that custodies the keys IS the realm's key
+  directory: a reader resolves any persona's public form — public
+  material, plus the owner binding, which is the attribution being
+  verified — and builds its verification keyring from the answer. No
+  published profile store, no per-user directory entry, no author-side
+  trust act. Soulstream's own persona directory remains its design for
+  realms without an identity plane; consumers of this one query it here.
+
+Costs, named honestly: **first owner wins** on a persona-name collision —
+user names are account-scoped, persona names realm-unique, so a same-named
+user in a second account finds the name taken and its signing refuses
+(one identity, one persona, one home — D6 as amended); and the open
+directory read makes owner bindings readable by any authenticated
+identity, which is the attribution model working as intended, not a leak.
+
+**Reversal condition**: a consumer whose persona name cannot equal its
+user name (observable: a consumer blocked on the materialization rule,
+recorded as an issue) reopens persona naming; key-lookup abuse
+(observable: enumeration-shaped `keys.public` traffic in the audit log)
+reopens the read gate — each as a new D-decision.
+
 ## The vault on KV
 
 Realizing D10 + D13, proven mechanically in journey 0004 [measured]:

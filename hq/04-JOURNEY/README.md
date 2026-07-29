@@ -17,19 +17,32 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-29)
 
+**The vault is the directory — ephemeral users, keys on first touch**
+([episode 0015](0015-the-vault-is-the-directory.md); D26 in
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)): episode
+0014's persona-directory trust path was refuted by the operator the same
+day — identity truth lives in the IAM, users are ephemeral, and no
+per-user act may exist anywhere. A persona key is a capability artifact,
+not identity (an access token carries no user key and cannot sign
+records): the caller's own key **materializes inside the vault on first
+touch**, owner-bound, and `keys.public` is the **open directory read** —
+readers build verification keyrings from the identity plane; no profile
+store. The sealed-communication key follows the same pattern when D9
+lands.
+
 **M2's first gate criterion is measured — the seam carries a real record**
-([episode 0014](0014-the-cross-service-proof.md)): a Soulstream record
-signed through the running SoulIdentity service verifies in a real realm.
-The proof lives in `e2e/` — a consumer-position module importing both
-repos (the cycle guard's shape), riding `make test`. One minted scoped
-credential carries both subject spaces and one connection serves both
-clients; `client.PersonaSigner` slots into `realm.Config.Signer`
-unmodified; the reader's keyring is built from the persona directory, and
-announce, baseline, and turn read `SigVerified` — `unknown-key` without
-the keyring, the negative control [measured]. What remains of M2 is the
-**node half** (one pooled connection per user, no node-held creds), which
-lives in soulstream's remote MCP node feature; the profile-publication
-duty on connect belongs there too.
+([episode 0014](0014-the-cross-service-proof.md), re-proven on the D26
+shape in 0015): a Soulstream record signed through the running
+SoulIdentity service verifies in a real realm. The proof lives in `e2e/`
+— a consumer-position module importing both repos (the cycle guard's
+shape), riding `make test`, now with **zero per-user acts**: one team
+key, one minted credential, the key materializing at signer construction,
+the reader's keyring one `keys.public` answer; announce, baseline, and
+turn read `SigVerified` — `unknown-key` without the keyring, the negative
+control [measured]. What remains of M2 is the **node half** (one pooled
+connection per user, no node-held creds), in soulstream's remote MCP node
+feature — which publishes nothing per user; it builds keyrings from the
+identity plane.
 
 **The identity registry is dissolved — authorization lives in the ACLs
 and the bindings** ([episode 0013](0013-the-registry-dissolves.md); D25 in
@@ -180,3 +193,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0012 | [The Entra lane: role == team, no mapping store](0012-entra-role-claim-lane.md) |
 | 0013 | [The registry dissolves: authorization in the ACLs and the bindings](0013-the-registry-dissolves.md) |
 | 0014 | [The cross-service proof: the seam carries a real record](0014-the-cross-service-proof.md) |
+| 0015 | [The vault is the directory: ephemeral users, keys on first touch](0015-the-vault-is-the-directory.md) |

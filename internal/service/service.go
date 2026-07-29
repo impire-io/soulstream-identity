@@ -306,7 +306,7 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		entry, err := s.ownedPersonaKey(account, user, req.Key)
+		entry, err := s.personaKeyPublic(account, user, req.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -368,12 +368,24 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 
 // ownedPersonaKey resolves key and checks the caller against its owner
 // binding — THE act-as gate (D6 as amended, D25), against the server-proven
-// principal. A key that is not the caller's persona key refuses identically
-// whether it exists or not: the refusal must not probe the vault.
+// principal. The caller's OWN persona key (persona/<user>) materializes on
+// first touch (D26): generated inside the vault, owner-bound — users are
+// ephemeral and no per-user provisioning act exists anywhere. Any other
+// key that is not the caller's refuses identically whether it exists or
+// not: the refusal must not probe the vault.
 func (s *Service) ownedPersonaKey(account, user, key string) (vault.Entry, error) {
 	refuse := fmt.Errorf("service: %s/%s has no persona key %q", account, user, key)
 	if !strings.HasPrefix(key, PersonaKeyPrefix) {
 		return vault.Entry{}, fmt.Errorf("service: persona keys are named %s<persona>, got %q", PersonaKeyPrefix, key)
+	}
+	if key == PersonaKeyPrefix+user {
+		entry, err := s.vault.GeneratePersonaKey(key, account, user)
+		if err != nil {
+			// Exists under another owner: a cross-account name collision —
+			// first owner wins (D26's named cost).
+			return vault.Entry{}, refuse
+		}
+		return entry, nil
 	}
 	entry, err := s.vault.Get(key)
 	if err != nil {
@@ -381,6 +393,26 @@ func (s *Service) ownedPersonaKey(account, user, key string) (vault.Entry, error
 	}
 	if entry.Kind != vault.KindPersonaSigningKey || entry.Account != account || entry.User != user {
 		return vault.Entry{}, refuse
+	}
+	return entry, nil
+}
+
+// personaKeyPublic serves the directory read (D26): the vault that
+// custodies the keys IS the realm's key directory, so any authenticated
+// caller may resolve any persona's public form — public material is
+// public, and the owner binding it names is the attribution readers
+// verify against. The caller's own persona still materializes here, so a
+// signer can be constructed before anything was ever signed.
+func (s *Service) personaKeyPublic(account, user, key string) (vault.Entry, error) {
+	if key == PersonaKeyPrefix+user {
+		return s.ownedPersonaKey(account, user, key)
+	}
+	if !strings.HasPrefix(key, PersonaKeyPrefix) {
+		return vault.Entry{}, fmt.Errorf("service: persona keys are named %s<persona>, got %q", PersonaKeyPrefix, key)
+	}
+	entry, err := s.vault.Get(key)
+	if err != nil || entry.Kind != vault.KindPersonaSigningKey {
+		return vault.Entry{}, fmt.Errorf("service: no persona key %q", key)
 	}
 	return entry, nil
 }

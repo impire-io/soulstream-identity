@@ -255,9 +255,12 @@ func (c *Client) SignRecord(persona string, canonical []byte) (string, error) {
 	return out.Sig, err
 }
 
-// PersonaPublicKey returns the public key (base64 raw Ed25519, the encoding
-// soulstream profiles and pins use) of a persona key owned by this client's
-// identity — the owner binding is enforced service-side.
+// PersonaPublicKey returns any persona's public key (base64 raw Ed25519,
+// the encoding soulstream pins and keyrings use) — the directory read
+// (D26): the vault that custodies the keys is the realm's key directory,
+// and readers build verification keyrings from it; no published per-user
+// profile store exists. The caller's own persona key materializes on
+// first touch.
 func (c *Client) PersonaPublicKey(persona string) (string, error) {
 	var out Key
 	err := c.call("keys.public", map[string]string{"key": PersonaKeyName(persona)}, &out)
@@ -278,18 +281,23 @@ type PersonaSigner struct {
 }
 
 // PersonaSigner binds persona to its signer, resolving the public key once
-// through keys.public — construction fails when the persona key is not the
-// client identity's own (D6 as amended, D25), so a mis-wired signer fails
-// fast, not at first publish.
+// through keys.public. The client identity's own persona key materializes
+// in the vault on this first touch (D26) — no provisioning act preceded
+// it. Construction fails when the persona key is owned by another
+// identity (D6 as amended), so a mis-wired signer fails fast, not at
+// first publish.
 func (c *Client) PersonaSigner(persona string) (*PersonaSigner, error) {
-	pub, err := c.PersonaPublicKey(persona)
-	if err != nil {
+	var out Key
+	if err := c.call("keys.public", map[string]string{"key": PersonaKeyName(persona)}, &out); err != nil {
 		return nil, err
 	}
-	if pub == "" {
+	if out.PublicKey == "" {
 		return nil, errors.New("soulidentity: keys.public returned no public key")
 	}
-	return &PersonaSigner{c: c, persona: persona, pub: pub}, nil
+	if out.Account != c.account || out.User != c.user {
+		return nil, fmt.Errorf("soulidentity: persona %q is owned by another identity — this client signs only with its own key", persona)
+	}
+	return &PersonaSigner{c: c, persona: persona, pub: out.PublicKey}, nil
 }
 
 // PublicKey returns the persona's public key — the identity this signer

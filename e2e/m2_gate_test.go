@@ -8,8 +8,6 @@
 package e2e_test
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,26 +24,31 @@ import (
 	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
 
+	"github.com/impire-io/soulstream/identity"
 	"github.com/impire-io/soulstream/realm"
-	"github.com/impire-io/soulstream/registry"
 	"github.com/impire-io/soulstream/topic"
 )
 
 // TestM2GateRecordSignedThroughTheServiceVerifiesInTheRealm runs the whole
 // consumer story on one operator-mode server:
 //
-//   - the SoulIdentity service custodies daan's persona key (owner-bound,
-//     D6 as amended / D25) and serves the sealed surface;
+//   - daan is EPHEMERAL: no per-user provisioning act exists anywhere —
+//     the IAM-shaped acts are per-team (the team key) and per-connection
+//     (the minted credential); daan's persona key MATERIALIZES inside the
+//     vault on first touch, owner-bound to the server-proven principal
+//     (D26);
 //   - daan holds ONE minted scoped credential whose template carries both
 //     subject spaces — the SoulIdentity user ops and the Soulstream realm
 //     (the shape the remote MCP node's per-user connections need);
 //   - daan's realm client signs every op through client.PersonaSigner —
-//     the process never holds the seed;
-//   - the author publishes its profile to the persona directory, and a
-//     separate reader builds its keyring from the directory (the real
-//     trust path) and sees every op SigVerified — after first seeing
-//     unknown-key without a keyring, the negative control that shows the
-//     verdict is earned, not defaulted.
+//     the process never holds the seed, which never existed outside the
+//     vault at all;
+//   - the reader builds its keyring FROM THE IDENTITY PLANE (keys.public,
+//     the directory read — the vault that custodies the keys is the key
+//     directory; there is no published per-user profile store) and sees
+//     every op SigVerified — after first seeing unknown-key without a
+//     keyring, the negative control that shows the verdict is earned, not
+//     defaulted.
 func TestM2GateRecordSignedThroughTheServiceVerifiesInTheRealm(t *testing.T) {
 	// --- The realm: operator, SYS, one APP account with JetStream and a
 	// scoped signing key template spanning both subject spaces.
@@ -174,10 +177,10 @@ jetstream { store_dir: %q }
 		t.Fatalf("service start: %v", err)
 	}
 
-	// --- The operator provisions: the team (bound to the account) and
-	// daan's persona key (owner-bound); daan's creds leave through the
-	// loud escape. The persona seed exists only here (the operator's act)
-	// and in the vault — never in daan's process below.
+	// --- The operator's acts are per-TEAM and per-CONNECTION only: the
+	// team key bound to its account, and daan's minted credential through
+	// the loud escape. Nothing names daan's persona — no import, no
+	// profile, no row. Users are ephemeral (D26).
 	ncAdmin, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(adminCreds))
 	if err != nil {
 		t.Fatalf("admin connect: %v", err)
@@ -186,11 +189,6 @@ jetstream { store_dir: %q }
 	admin := client.New(ncAdmin, accPub, "ops")
 	if _, err := admin.ImportKey("acme", client.KindNATSAccountSigningKey, string(askSeed), accPub, ""); err != nil {
 		t.Fatalf("import team key: %v", err)
-	}
-	_, personaPriv, _ := ed25519.GenerateKey(nil)
-	personaSeed := base64.StdEncoding.EncodeToString(personaPriv.Seed())
-	if _, err := admin.ImportKey(client.PersonaKeyName("daan"), client.KindPersonaSigningKey, personaSeed, accPub, "daan"); err != nil {
-		t.Fatalf("import persona key: %v", err)
 	}
 	minted, err := admin.MintCreds(accPub, "daan")
 	if err != nil {
@@ -203,7 +201,10 @@ jetstream { store_dir: %q }
 
 	// --- The consumer wiring (M2): ONE connection for daan; the
 	// SoulIdentity client and the Soulstream realm client share it. The
-	// PersonaSigner satisfies soulstream's identity.Signer structurally.
+	// PersonaSigner satisfies soulstream's identity.Signer structurally,
+	// and constructing it is daan's FIRST TOUCH: the persona key
+	// materializes inside the vault at this call, owner-bound (D26) — the
+	// seed has never existed anywhere else.
 	ncDaan, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(daanCreds))
 	if err != nil {
 		t.Fatalf("daan connect: %v", err)
@@ -238,15 +239,9 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(func() { _ = rcDaan.Close() })
 
-	// Author-side trust: daan publishes its profile — the persona
-	// directory entry carrying the vault-held key's PUBLIC half.
-	now := time.Now().UTC()
-	if err := registry.Publish(t.Context(), rcDaan, registry.Profile{
-		Name: "daan", DisplayName: "Daan", CreatedAt: now,
-		SigningKey: &registry.SigningKeyInfo{Ed25519: signer.PublicKey(), Since: now},
-	}); err != nil {
-		t.Fatalf("publish profile: %v", err)
-	}
+	// Deliberately absent here: any author-side trust act. daan publishes
+	// NO profile — there is no persona registry anywhere; the identity
+	// plane is the key directory (D26) and the reader queries it below.
 
 	// --- Publish through the seam: the announce, the baseline, and one
 	// turn — every op signed by the vault, round-tripping the sealed
@@ -272,16 +267,16 @@ jetstream { store_dir: %q }
 		t.Fatalf("without a keyring the announcement must read unknown-key, got %+v", bare.Announcement)
 	}
 
-	// The real trust path: the keyring is built from the persona
-	// directory, not handed to the reader out of band.
-	profiles, warnings, err := registry.All(t.Context(), rcReader)
+	// The trust path: the reader asks the IDENTITY PLANE for the author's
+	// public key — the vault that custodies the keys is the key directory
+	// (D26); no profile store, no out-of-band handoff. The keyring is
+	// soulstream's, built from soulidentity's answer: the two systems
+	// meeting exactly at the seam.
+	authorPub, err := client.New(ncReader, accPub, "reader").PersonaPublicKey("daan")
 	if err != nil {
-		t.Fatalf("registry.All: %v", err)
+		t.Fatalf("directory read: %v", err)
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("profile warnings: %+v", warnings)
-	}
-	kr, _ := registry.BuildKeyring(profiles, nil)
+	kr := &identity.Keyring{Keys: map[string][]string{"daan": {authorPub}}}
 	hr.UseKeyring(kr)
 
 	mt, err := hr.Materialise(t.Context())
@@ -300,10 +295,10 @@ jetstream { store_dir: %q }
 		}
 	}
 
-	// The signature chain is the vault's: the directory key the reader
-	// trusted is exactly the public half SoulIdentity recorded at import.
-	if signer.PublicKey() == "" {
-		t.Fatal("signer has no public key")
+	// The chain closes: the key the reader trusted from the identity plane
+	// is exactly the key the signer materialized — one key, one home.
+	if signer.PublicKey() == "" || authorPub != signer.PublicKey() {
+		t.Fatalf("directory key %q != signer key %q", authorPub, signer.PublicKey())
 	}
 }
 

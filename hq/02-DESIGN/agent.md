@@ -200,10 +200,11 @@ identity design refuses the fan-out the list allowed: a persona is the one
 noun for any identity — human, agent, or job — an agent acting on someone's
 behalf gets *its own* persona, and there is deliberately no `on_behalf_of`.
 So the grant is not a list, it is ownership: a persona signing key carries
-its **owner identity (account, user)** at import, the exact D24 move for
-team keys, and `sign.record` checks the caller against the binding — still
-checked on every request, still logged against the server-proven principal
-(D15). One identity, one persona; ghostwriting through the oracle is not a
+its **owner identity (account, user)** — at import, the exact D24 move for
+team keys, or at first-use generation inside the vault (D26: the caller's
+own key materializes on first touch; no per-user provisioning act exists)
+— and `sign.record` checks the caller against the binding — still checked
+on every request, still logged against the server-proven principal (D15). One identity, one persona; ghostwriting through the oracle is not a
 thing this design does. **Reversal condition**: a real consumer need for
 one connection signing as a persona it does not own (observable: a consumer
 blocked on a refused `sign.record`, recorded as an issue) adds delegation

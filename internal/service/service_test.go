@@ -172,7 +172,9 @@ func TestOwnerBindingGatesSigning(t *testing.T) {
 		t.Fatal("non-persona key name accepted for record signing")
 	}
 
-	// keys.public: the owner reads the public key; a non-owner is refused.
+	// keys.public is the directory read (D26): ANY authenticated caller
+	// resolves any persona's public form — that is how readers build
+	// verification keyrings without a profile store.
 	var pub vault.Entry
 	if err := call(t, s, acc, "daan", "keys.public",
 		keyPublicRequest{Key: "persona/daan"}, &pub); err != nil {
@@ -181,9 +183,63 @@ func TestOwnerBindingGatesSigning(t *testing.T) {
 	if pub.PublicKey != sig.PublicKey {
 		t.Fatalf("keys.public %q != sign.record public key %q", pub.PublicKey, sig.PublicKey)
 	}
+	var reader vault.Entry
 	if err := call(t, s, acc, "mallory", "keys.public",
-		keyPublicRequest{Key: "persona/daan"}, nil); err == nil {
-		t.Fatal("non-owner read a persona public key")
+		keyPublicRequest{Key: "persona/daan"}, &reader); err != nil {
+		t.Fatalf("a reader must resolve another persona's public key (D26): %v", err)
+	}
+	if reader.PublicKey != pub.PublicKey || reader.Account != acc || reader.User != "daan" {
+		t.Fatalf("directory read: %+v", reader)
+	}
+	// A non-persona key is not in the directory.
+	if err := call(t, s, acc, "mallory", "keys.public",
+		keyPublicRequest{Key: "imported"}, nil); err == nil {
+		t.Fatal("a non-persona key answered the directory read")
+	}
+}
+
+func TestPersonaKeyMaterializesOnFirstUse(t *testing.T) {
+	s, _, acc := harness(t)
+	canonical := base64.StdEncoding.EncodeToString([]byte("first-ever-bytes"))
+
+	// No import, no provisioning act of any kind: mallory signs with her
+	// own persona name and the key materializes in the vault, owner-bound
+	// to the server-proven principal (D26).
+	var sig signRecordResponse
+	if err := call(t, s, acc, "mallory", "sign.record",
+		signRecordRequest{Key: "persona/mallory", Canonical: canonical}, &sig); err != nil {
+		t.Fatalf("first-use signing refused: %v", err)
+	}
+	if sig.Sig == "" || sig.PublicKey == "" {
+		t.Fatalf("materialized signing: %+v", sig)
+	}
+	// The key is stable: a second touch signs with the same key.
+	var again signRecordResponse
+	if err := call(t, s, acc, "mallory", "sign.record",
+		signRecordRequest{Key: "persona/mallory", Canonical: canonical}, &again); err != nil {
+		t.Fatalf("second signing refused: %v", err)
+	}
+	if again.PublicKey != sig.PublicKey {
+		t.Fatalf("persona key changed across touches: %q != %q", again.PublicKey, sig.PublicKey)
+	}
+	// keys.public materializes too — a signer can exist before anything
+	// was signed.
+	var fresh vault.Entry
+	if err := call(t, s, acc, "daan", "keys.public",
+		keyPublicRequest{Key: "persona/daan"}, &fresh); err != nil {
+		t.Fatalf("keys.public first touch refused: %v", err)
+	}
+	if fresh.PublicKey == "" || fresh.User != "daan" {
+		t.Fatalf("materialized on read: %+v", fresh)
+	}
+	// The cross-account collision cost, first owner wins: a daan in
+	// ANOTHER account cannot sign with (or take) the existing name.
+	acc2KP, _ := nkeys.CreateAccount()
+	acc2, _ := acc2KP.PublicKey()
+	if err := call(t, s, acc2, "mallory", "sign.record",
+		signRecordRequest{Key: "persona/mallory", Canonical: canonical}, nil); err == nil ||
+		!strings.Contains(err.Error(), "no persona key") {
+		t.Fatalf("a second account's claimant must refuse, got %v", err)
 	}
 }
 

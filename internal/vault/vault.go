@@ -220,6 +220,29 @@ func (v *Vault) Import(name string, kind Kind, secret, account, user string) (En
 	return Entry{Name: name, Kind: kind, PublicKey: pub, Account: account, User: user}, nil
 }
 
+// GeneratePersonaKey creates a persona signing key inside the vault, bound
+// to its owner (account, user), or returns the existing entry when name is
+// already present with the same owner — the materialize-on-first-use path
+// (hq/02-DESIGN/nats-surface.md D26): no per-user provisioning act exists;
+// the seed is generated in-vault and never leaves except through
+// ExportSeed. A name held by another owner or kind refuses.
+func (v *Vault) GeneratePersonaKey(name, account, user string) (Entry, error) {
+	if e, err := v.Get(name); err == nil {
+		if e.Kind != KindPersonaSigningKey || e.Account != account || e.User != user {
+			return Entry{}, fmt.Errorf("vault: %s exists with another owner or kind", name)
+		}
+		return e, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return Entry{}, err
+	}
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return Entry{}, fmt.Errorf("vault: generate persona key: %w", err)
+	}
+	seed := base64.StdEncoding.EncodeToString(priv.Seed())
+	return v.Import(name, KindPersonaSigningKey, seed, account, user)
+}
+
 // GenerateUserKey creates a NATS user key inside the vault, or returns the
 // existing entry when name is already present (mint reuses user keys). The
 // seed never leaves except through ExportSeed.
