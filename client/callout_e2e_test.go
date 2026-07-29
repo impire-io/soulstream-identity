@@ -17,7 +17,6 @@ import (
 	"github.com/impire-io/soulidentity/client"
 	"github.com/impire-io/soulidentity/internal/callout"
 	"github.com/impire-io/soulidentity/internal/oidcstub"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
@@ -154,19 +153,9 @@ jetstream { store_dir: %q }
 	}
 
 	// --- The service: vault + token store on APP's JetStream, the surface
-	// on the APP connection, the issuer on the AUTH connection (D21).
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
-	for _, id := range []registry.Identity{
-		{Account: appPub, User: "ops", Admin: true},
-		{Account: appPub, User: "daan-ext", Role: "acme/role"},
-	} {
-		if err := reg.Put(id); err != nil {
-			t.Fatalf("declare %s: %v", id.User, err)
-		}
-	}
+	// on the APP connection, the issuer on the AUTH connection (D21). No
+	// registry (D25): the token record names the identity, the team binding
+	// authorizes it, and the operator's creds ARE the admin declaration.
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
 	surfaceKP, _ := nkeys.CreateCurveKeys()
@@ -197,7 +186,7 @@ jetstream { store_dir: %q }
 
 	audit := &syncBuffer{}
 	logger := newAuditLogger(audit)
-	svc, err := service.New(v, reg, string(surfaceSeed), logger,
+	svc, err := service.New(v, string(surfaceSeed), logger,
 		service.WithCallout(store, "auth/issuer", authPub))
 	if err != nil {
 		t.Fatalf("service: %v", err)
@@ -211,7 +200,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("issuer connect: %v", err)
 	}
 	t.Cleanup(ncIssuer.Close)
-	issuer, err := callout.NewIssuer(v, reg, store, "auth/issuer", 2*time.Minute, string(calloutSeed), logger)
+	issuer, err := callout.NewIssuer(v, store, "auth/issuer", 2*time.Minute, string(calloutSeed), logger)
 	if err != nil {
 		t.Fatalf("issuer: %v", err)
 	}
@@ -230,10 +219,10 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(ncAdmin.Close)
 	admin := client.New(ncAdmin, appPub, "ops")
-	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(roleSeed), appPub); err != nil {
-		t.Fatalf("import role key: %v", err)
+	if _, err := admin.ImportKey("acme", client.KindNATSAccountSigningKey, string(roleSeed), appPub, ""); err != nil {
+		t.Fatalf("import team key: %v", err)
 	}
-	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub); err != nil {
+	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub, ""); err != nil {
 		t.Fatalf("import auth key: %v", err)
 	}
 	created, err := admin.CreateToken(appPub, "daan-ext", "daan laptop", 0)
@@ -327,7 +316,10 @@ jetstream { store_dir: %q }
 // after the TTL disconnect, a role-stripped fresh token refuses.
 func TestEntraGateAgainstOperatorModeServer(t *testing.T) {
 	// --- The realm: operator, SYS, AUTH (external authorization + xkey),
-	// APP with TWO scoped signing keys — the two teams (SC-007's rig).
+	// APP (the service's own account, JetStream), and TWO team accounts —
+	// ENG and PLAT, each with its scoped signing key (SC-007's rig on the
+	// D25 shape: a team is an account signing key bound to its account, and
+	// the token lane resolves by that binding, so teams are accounts).
 	opKP, _ := nkeys.CreateOperator()
 	opPub, _ := opKP.PublicKey()
 	sysKP, _ := nkeys.CreateAccount()
@@ -336,12 +328,16 @@ func TestEntraGateAgainstOperatorModeServer(t *testing.T) {
 	authPub, _ := authKP.PublicKey()
 	appKP, _ := nkeys.CreateAccount()
 	appPub, _ := appKP.PublicKey()
-	engKP, _ := nkeys.CreateAccount()
-	engPub, _ := engKP.PublicKey()
-	engSeed, _ := engKP.Seed()
-	platKP, _ := nkeys.CreateAccount()
-	platPub, _ := platKP.PublicKey()
-	platSeed, _ := platKP.Seed()
+	engAccKP, _ := nkeys.CreateAccount()
+	engAccPub, _ := engAccKP.PublicKey()
+	engSKKP, _ := nkeys.CreateAccount()
+	engSKPub, _ := engSKKP.PublicKey()
+	engSKSeed, _ := engSKKP.Seed()
+	platAccKP, _ := nkeys.CreateAccount()
+	platAccPub, _ := platAccKP.PublicKey()
+	platSKKP, _ := nkeys.CreateAccount()
+	platSKPub, _ := platSKKP.PublicKey()
+	platSKSeed, _ := platSKKP.Seed()
 	authSKKP, _ := nkeys.CreateAccount()
 	authSKPub, _ := authSKKP.PublicKey()
 	authSKSeed, _ := authSKKP.Seed()
@@ -367,7 +363,7 @@ func TestEntraGateAgainstOperatorModeServer(t *testing.T) {
 	authClaim.Name = "AUTH"
 	authClaim.SigningKeys.Add(authSKPub)
 	authClaim.EnableExternalAuthorization(issuerUserPub)
-	authClaim.Authorization.AllowedAccounts.Add(appPub)
+	authClaim.Authorization.AllowedAccounts.Add(engAccPub, platAccPub)
 	authClaim.Authorization.XKey = calloutPub
 	authJWT, err := authClaim.Encode(opKP)
 	if err != nil {
@@ -378,25 +374,37 @@ func TestEntraGateAgainstOperatorModeServer(t *testing.T) {
 	appClaim.Limits.JetStreamLimits = jwt.JetStreamLimits{
 		MemoryStorage: -1, DiskStorage: -1, Streams: -1, Consumer: -1,
 	}
+	appJWT, err := appClaim.Encode(opKP)
+	if err != nil {
+		t.Fatalf("app account jwt: %v", err)
+	}
+	engClaim := jwt.NewAccountClaims(engAccPub)
+	engClaim.Name = "ENG"
 	engScope := jwt.NewUserScope()
-	engScope.Key = engPub
+	engScope.Key = engSKPub
 	engScope.Role = "engineering"
 	engScope.Template = jwt.UserPermissionLimits{Permissions: jwt.Permissions{
 		Pub: jwt.Permission{Allow: jwt.StringList{"demo.>"}},
 		Sub: jwt.Permission{Allow: jwt.StringList{"demo.>", "_INBOX.>"}},
 	}}
-	appClaim.SigningKeys.AddScopedSigner(engScope)
+	engClaim.SigningKeys.AddScopedSigner(engScope)
+	engJWT, err := engClaim.Encode(opKP)
+	if err != nil {
+		t.Fatalf("eng account jwt: %v", err)
+	}
+	platClaim := jwt.NewAccountClaims(platAccPub)
+	platClaim.Name = "PLAT"
 	platScope := jwt.NewUserScope()
-	platScope.Key = platPub
+	platScope.Key = platSKPub
 	platScope.Role = "platform"
 	platScope.Template = jwt.UserPermissionLimits{Permissions: jwt.Permissions{
 		Pub: jwt.Permission{Allow: jwt.StringList{"ops.>"}},
 		Sub: jwt.Permission{Allow: jwt.StringList{"ops.>", "_INBOX.>"}},
 	}}
-	appClaim.SigningKeys.AddScopedSigner(platScope)
-	appJWT, err := appClaim.Encode(opKP)
+	platClaim.SigningKeys.AddScopedSigner(platScope)
+	platJWT, err := platClaim.Encode(opKP)
 	if err != nil {
-		t.Fatalf("app account jwt: %v", err)
+		t.Fatalf("plat account jwt: %v", err)
 	}
 
 	cfg := fmt.Sprintf(`
@@ -408,9 +416,12 @@ resolver_preload: {
   %s: %s,
   %s: %s,
   %s: %s,
+  %s: %s,
+  %s: %s,
 }
 jetstream { store_dir: %q }
-`, opJWT, sysPub, sysPub, sysJWT, authPub, authJWT, appPub, appJWT, t.TempDir())
+`, opJWT, sysPub, sysPub, sysJWT, authPub, authJWT, appPub, appJWT,
+		engAccPub, engJWT, platAccPub, platJWT, t.TempDir())
 	cfgPath := filepath.Join(t.TempDir(), "server.conf")
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -452,19 +463,9 @@ jetstream { store_dir: %q }
 	}
 
 	// --- The service + issuer, with the OIDC lane against the local stub
-	// (FR-011) and a short TTL so the revocation bound is observable.
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
-	for _, id := range []registry.Identity{
-		{Account: appPub, User: "ops", Admin: true},
-		{Account: appPub, User: "daan-ext", Role: "engineering"},
-	} {
-		if err := reg.Put(id); err != nil {
-			t.Fatalf("declare %s: %v", id.User, err)
-		}
-	}
+	// (FR-011) and a short TTL so the revocation bound is observable. No
+	// registry (D25): the team bindings and the token store carry every
+	// declared fact.
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
 	surfaceKP, _ := nkeys.CreateCurveKeys()
@@ -505,7 +506,7 @@ jetstream { store_dir: %q }
 
 	audit := &syncBuffer{}
 	logger := newAuditLogger(audit)
-	svc, err := service.New(v, reg, string(surfaceSeed), logger,
+	svc, err := service.New(v, string(surfaceSeed), logger,
 		service.WithCallout(store, "auth/issuer", authPub))
 	if err != nil {
 		t.Fatalf("service: %v", err)
@@ -519,7 +520,7 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(ncIssuer.Close)
 	const calloutTTL = 5 * time.Second // the revocation propagation bound
-	issuer, err := callout.NewIssuer(v, reg, store, "auth/issuer", calloutTTL,
+	issuer, err := callout.NewIssuer(v, store, "auth/issuer", calloutTTL,
 		string(calloutSeed), logger, callout.WithOIDC(oidcVal))
 	if err != nil {
 		t.Fatalf("issuer: %v", err)
@@ -540,16 +541,16 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(ncAdmin.Close)
 	admin := client.New(ncAdmin, appPub, "ops")
-	if _, err := admin.ImportKey("engineering", client.KindNATSAccountSigningKey, string(engSeed), appPub); err != nil {
+	if _, err := admin.ImportKey("engineering", client.KindNATSAccountSigningKey, string(engSKSeed), engAccPub, ""); err != nil {
 		t.Fatalf("import engineering: %v", err)
 	}
-	if _, err := admin.ImportKey("platform", client.KindNATSAccountSigningKey, string(platSeed), appPub); err != nil {
+	if _, err := admin.ImportKey("platform", client.KindNATSAccountSigningKey, string(platSKSeed), platAccPub, ""); err != nil {
 		t.Fatalf("import platform: %v", err)
 	}
-	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub); err != nil {
+	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub, ""); err != nil {
 		t.Fatalf("import auth key: %v", err)
 	}
-	created, err := admin.CreateToken(appPub, "daan-ext", "daan laptop", 0)
+	created, err := admin.CreateToken(engAccPub, "daan-ext", "daan laptop", 0)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -611,16 +612,8 @@ jetstream { store_dir: %q }
 	}
 
 	// SC-007 [measured]: the declared state has zero per-person entries for
-	// the oid — no registry row, no vault key, no token record names it.
-	ids, err := admin.Identities()
-	if err != nil {
-		t.Fatalf("identities: %v", err)
-	}
-	for _, id := range ids {
-		if strings.Contains(id.User, oid) {
-			t.Fatalf("a per-person registry entry appeared for the oid: %+v", id)
-		}
-	}
+	// the oid — no vault key and no token record names it (and there is no
+	// registry to hold one, D25).
 	keys, err := admin.Keys()
 	if err != nil {
 		t.Fatalf("keys: %v", err)
@@ -628,6 +621,15 @@ jetstream { store_dir: %q }
 	for _, k := range keys {
 		if strings.Contains(k.Name, oid) {
 			t.Fatalf("a per-person vault entry appeared for the oid: %+v", k)
+		}
+	}
+	toks, err := admin.Tokens()
+	if err != nil {
+		t.Fatalf("tokens: %v", err)
+	}
+	for _, tk := range toks {
+		if strings.Contains(tk.User, oid) {
+			t.Fatalf("a per-person token record appeared for the oid: %+v", tk)
 		}
 	}
 
@@ -656,8 +658,9 @@ jetstream { store_dir: %q }
 		}
 	}
 
-	// --- Coexistence [measured]: the sit_ lane admits via the registry row
-	// with the OIDC lane configured; both lanes share the team object.
+	// --- Coexistence [measured]: the sit_ lane admits via its token record
+	// and the team binding with the OIDC lane configured; both lanes share
+	// the declared team set (D24, D25).
 	ncTok, err := nats.Connect(srv.ClientURL(),
 		nats.UserCredentials(sentinelCreds), nats.Token(created.Token))
 	if err != nil {

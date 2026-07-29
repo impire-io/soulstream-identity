@@ -6,6 +6,18 @@ gate.*
 
 ## Where we are (2026-07-29)
 
+**The registry dissolved — D25, same day**
+([journey 0013](../04-JOURNEY/0013-the-registry-dissolves.md), D25 in
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md) amending
+D2/D5/D6/D18/D22/D24): authorization lives in the transport ACLs (the op
+tail of the subject, gated by the same enforcement as D15's principal)
+and the vault bindings (persona keys carry their owner; every mint
+resolves by the account's team binding). `internal/registry`, the `admin`
+flag, `identities.*`, and self-mint are deleted; the token store is the
+one registry standing; teams are accounts. All three e2e gates re-proven
+[measured]. The client gained M2's seam surface (`PersonaSigner`,
+`keys.public`, `sign.record` returning the public key).
+
 **The Entra/OIDC lane — shipped 2026-07-29**
 ([journey 0012](../04-JOURNEY/0012-entra-role-claim-lane.md), D23–D24 in
 [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), feature
@@ -84,11 +96,16 @@ arrive over the NATS surface).
    guard)**: Go satisfies the seam structurally, so the adapter lives in the
    *consumer* binary — this repo MUST NOT import soulstream, soulstream never
    imports this repo, and consumers sit above both; a module cycle is legal
-   in Go but a versioning trap we simply never enter. Gate: a Soulstream
-   record signed through the service verifies in the realm [measured]; the
-   node holds one pooled connection per user with no node-held creds. This
-   milestone lives mostly in the consuming repos; here it may add only what
-   those consumers prove missing.
+   in Go but a versioning trap we simply never enter. What the seam proved
+   missing landed 2026-07-29 with D25 (journey 0013): `client.PersonaSigner`
+   — the seam's exact shape, fail-fast construction over the owner-gated
+   `keys.public`, never ("", nil) — exercised in the M3 rig. Gate: a
+   Soulstream record signed through the service verifies in the realm
+   [measured] (the proof rig must sit in a consumer position — the cycle
+   guard forbids importing soulstream here; likely a nested test module);
+   the node holds one pooled connection per user with no node-held creds.
+   This milestone lives mostly in the consuming repos; here it may add only
+   what those consumers prove missing.
 3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
    [journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md)). The
    agent's contract served over NATS request/reply with xkey-sealed
@@ -163,4 +180,4 @@ arrive over the NATS surface).
 |---|---|
 | **Custody boundary.** | Once consumers rely on "seeds never leave", any API that returns key material — however convenient — is a constitution-I amendment, not a feature. |
 | **Wire contract.** | The agent's JSON surface is mirrored in `client/`; the payload shapes survive the transport swap to NATS subjects (M3) — changes after M2 must stay compatible or version the subject space. |
-| **Registry file shape.** | Strict-decoded; additive fields require a migration story for existing data dirs. |
+| **Vault record shape.** | Sealed `stored{}` records decode additively; a *required* binding on an existing kind (as D25 did to persona keys) means unbound records fail closed until re-imported — that re-import is the migration story, stated per change. The registry file door closed with the registry (D25, journey 0013). |

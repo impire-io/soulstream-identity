@@ -33,14 +33,18 @@ const (
 	KindPersonaSigningKey Kind = "persona-signing-key"
 )
 
-// Entry is a vault key as the API shows it: never the secret. Account is
-// the account identity an account signing key signs for — the team object's
-// binding (hq/02-DESIGN/auth-callout.md D24); empty for other kinds.
+// Entry is a vault key as the API shows it: never the secret. The binding
+// fields are the authorization source (hq/02-DESIGN/nats-surface.md D25):
+// for an account signing key, Account is the account identity it signs for —
+// the team object's binding (hq/02-DESIGN/auth-callout.md D24); for a
+// persona signing key, (Account, User) is the owner identity that may sign
+// with it (hq/02-DESIGN/agent.md D6 as amended); both empty for user keys.
 type Entry struct {
 	Name      string `json:"name"`
 	Kind      Kind   `json:"kind"`
 	PublicKey string `json:"public_key"`
 	Account   string `json:"account,omitempty"`
+	User      string `json:"user,omitempty"`
 }
 
 // Sentinel errors; the service maps them to wire errors.
@@ -63,12 +67,14 @@ type Store interface {
 
 // stored is the record shape sealed into the backend. Secret is the seed in
 // its kind's native encoding. Account binds an account signing key to the
-// account identity it signs for (D24); empty for other kinds.
+// account identity it signs for (D24); (Account, User) binds a persona
+// signing key to its owner (D6 as amended, D25); both empty for user keys.
 type stored struct {
 	Kind      Kind   `json:"kind"`
 	Secret    string `json:"secret"`
 	PublicKey string `json:"public_key"`
 	Account   string `json:"account,omitempty"`
+	User      string `json:"user,omitempty"`
 }
 
 // Vault seals records to the first key and hands the backend ciphertext only.
@@ -171,25 +177,36 @@ func derive(kind Kind, secret string) (string, error) {
 
 // Import stores a secret under name. Existing names are refused, never
 // overwritten — a changed key is indistinguishable from a substitution.
-// account is the account identity an account signing key signs for —
-// required for that kind (the key name is the team name; the binding
-// completes the team object, D24) and refused for every other kind.
-func (v *Vault) Import(name string, kind Kind, secret, account string) (Entry, error) {
+// The binding completes the key (D25): an account signing key requires
+// account — the identity it signs for (the key name is the team name,
+// D24); a persona signing key requires (account, user) — the owner that
+// may sign with it (D6 as amended); a user key refuses both.
+func (v *Vault) Import(name string, kind Kind, secret, account, user string) (Entry, error) {
 	if err := checkName(name); err != nil {
 		return Entry{}, err
 	}
-	if kind == KindNATSAccountSigningKey {
+	switch kind {
+	case KindNATSAccountSigningKey:
 		if !nkeys.IsValidPublicAccountKey(account) {
 			return Entry{}, fmt.Errorf("vault: an account signing key needs its account binding (a public account key, got %q)", account)
 		}
-	} else if account != "" {
-		return Entry{}, fmt.Errorf("vault: %q keys carry no account binding", kind)
+		if user != "" {
+			return Entry{}, fmt.Errorf("vault: an account signing key binds to an account, not a user (got user %q)", user)
+		}
+	case KindPersonaSigningKey:
+		if !nkeys.IsValidPublicAccountKey(account) || user == "" {
+			return Entry{}, fmt.Errorf("vault: a persona key needs its owner binding (a public account key and a user name)")
+		}
+	default:
+		if account != "" || user != "" {
+			return Entry{}, fmt.Errorf("vault: %q keys carry no binding", kind)
+		}
 	}
 	pub, err := derive(kind, secret)
 	if err != nil {
 		return Entry{}, err
 	}
-	plain, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub, Account: account})
+	plain, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub, Account: account, User: user})
 	if err != nil {
 		return Entry{}, fmt.Errorf("vault: encode key: %w", err)
 	}
@@ -200,7 +217,7 @@ func (v *Vault) Import(name string, kind Kind, secret, account string) (Entry, e
 	if err := v.store.Create(name, sealed); err != nil {
 		return Entry{}, err
 	}
-	return Entry{Name: name, Kind: kind, PublicKey: pub, Account: account}, nil
+	return Entry{Name: name, Kind: kind, PublicKey: pub, Account: account, User: user}, nil
 }
 
 // GenerateUserKey creates a NATS user key inside the vault, or returns the
@@ -223,7 +240,7 @@ func (v *Vault) GenerateUserKey(name string) (Entry, error) {
 	if err != nil {
 		return Entry{}, fmt.Errorf("vault: read generated seed: %w", err)
 	}
-	return v.Import(name, KindNATSUserKey, string(seed), "")
+	return v.Import(name, KindNATSUserKey, string(seed), "", "")
 }
 
 func (v *Vault) load(name string) (stored, error) {
@@ -251,7 +268,7 @@ func (v *Vault) Get(name string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	return Entry{Name: name, Kind: s.Kind, PublicKey: s.PublicKey, Account: s.Account}, nil
+	return Entry{Name: name, Kind: s.Kind, PublicKey: s.PublicKey, Account: s.Account, User: s.User}, nil
 }
 
 // List returns every entry (public form), sorted by name.
@@ -270,6 +287,36 @@ func (v *Vault) List() ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// TeamForAccount resolves the team that signs for account: the one account
+// signing key whose binding names it (D24, resolved per D25 — every mint
+// path authorizes against this). None declared refuses; more than one
+// refuses as ambiguous, because import order must never decide which key
+// signs (the D5 amendment's reversal condition watches this refusal).
+func (v *Vault) TeamForAccount(account string) (Entry, error) {
+	entries, err := v.List()
+	if err != nil {
+		return Entry{}, err
+	}
+	var teams []Entry
+	for _, e := range entries {
+		if e.Kind == KindNATSAccountSigningKey && e.Account == account {
+			teams = append(teams, e)
+		}
+	}
+	switch len(teams) {
+	case 0:
+		return Entry{}, fmt.Errorf("vault: no team is bound to account %s", account)
+	case 1:
+		return teams[0], nil
+	default:
+		names := make([]string, len(teams))
+		for i, e := range teams {
+			names[i] = e.Name
+		}
+		return Entry{}, fmt.Errorf("vault: %d teams are bound to account %s (%s) — ambiguous", len(teams), account, strings.Join(names, ", "))
+	}
 }
 
 // SignRecord signs canonical record bytes with a persona key, returning the

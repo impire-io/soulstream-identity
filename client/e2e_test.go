@@ -22,7 +22,6 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
@@ -37,20 +36,27 @@ const (
 
 // TestM3GateAgainstOperatorModeServer is the NATS-native rebuild's end-to-end
 // proof [measured] — the M3 gate (hq/02-DESIGN/nats-surface.md, acceptance
-// criteria): a NATS server in operator mode with JetStream, the service on
-// its sealed surface, a scoped signing key whose template pins each user to
-// its own subject prefix (D15), and four measured proofs:
+// criteria), re-proven on the D25 shape (no registry; the ACL gates the op
+// tail, the bindings gate the data): a NATS server in operator mode with
+// JetStream, the service on its sealed surface, a scoped signing key whose
+// template pins each user to its own prefix AND to the user ops only
+// (D15/D25), and five measured proofs:
 //
-//  1. an unauthorized act-as request is refused and logged;
+//  1. signing with a persona key the caller does not own is refused and
+//     logged (the owner binding, D6 as amended);
 //  2. a request body on the wire is ciphertext to an account-privileged
 //     observer;
 //  3. the vault's KV bucket holds ciphertext only at rest, shown against a
 //     plaintext positive control;
 //  4. a caller on another identity's prefix is refused by the server and
-//     never reaches the service.
+//     never reaches the service;
+//  5. a represented user publishing a management op on its OWN prefix is
+//     refused by the server and never reaches the service — the D25 op-tail
+//     gate, zero service decisions.
 func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	// --- The realm: operator, SYS, one account with JetStream and a scoped
-	// signing key template that pins users to their own prefix (D15).
+	// signing key template that pins users to their own prefix and to the
+	// user ops (D15, D25).
 	opKP, _ := nkeys.CreateOperator()
 	opPub, _ := opKP.PublicKey()
 	sysKP, _ := nkeys.CreateAccount()
@@ -78,6 +84,9 @@ func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	ac.Limits.JetStreamLimits = jwt.JetStreamLimits{
 		MemoryStorage: -1, DiskStorage: -1, Streams: -1, Consumer: -1,
 	}
+	// The represented-user scope: own prefix AND the user ops only — the
+	// op-tail half of D25's ACL gate. Management op subjects are simply not
+	// in the template.
 	scope := jwt.NewUserScope()
 	scope.Key = askPub
 	scope.Role = "soulidentity-user"
@@ -85,7 +94,8 @@ func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 		Permissions: jwt.Permissions{
 			Pub: jwt.Permission{Allow: jwt.StringList{
 				e2eRoot + ".status", e2eRoot + ".xkey",
-				e2eRoot + ".{{account-subject()}}.{{name()}}.>",
+				e2eRoot + ".{{account-subject()}}.{{name()}}.sign.record",
+				e2eRoot + ".{{account-subject()}}.{{name()}}.keys.public",
 			}},
 			Sub: jwt.Permission{Allow: jwt.StringList{"_INBOX.>"}},
 		},
@@ -141,15 +151,9 @@ jetstream { store_dir: %q }
 		Sub: jwt.Permission{Allow: jwt.StringList{e2eRoot + ".>"}},
 	})
 
-	// --- The service: registry with the operator-declared first admin row,
-	// vault on the KV backend, both xkeys deployment-supplied (D13/D17).
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
-	if err := reg.Put(registry.Identity{Account: accPub, User: "ops", Admin: true}); err != nil {
-		t.Fatalf("declare admin: %v", err)
-	}
+	// --- The service: vault on the KV backend, both xkeys deployment-
+	// supplied (D13/D17). No registry: the operator's creds ARE the admin
+	// declaration — their permission template grants the op space (D25).
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
 	surfaceKP, _ := nkeys.CreateCurveKeys()
@@ -176,7 +180,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("vault verify: %v", err)
 	}
 	audit := &syncBuffer{}
-	svc, err := service.New(v, reg, string(surfaceSeed), newAuditLogger(audit),
+	svc, err := service.New(v, string(surfaceSeed), newAuditLogger(audit),
 		service.WithPrefix(e2ePrefix))
 	if err != nil {
 		t.Fatalf("service: %v", err)
@@ -185,9 +189,11 @@ jetstream { store_dir: %q }
 		t.Fatalf("service start: %v", err)
 	}
 
-	// --- Admin provisions through the sealed surface: the scoped signing key
-	// and a persona key enter the vault (and are never seen again), daan is
-	// declared, and daan's creds leave through the loud escape (D7).
+	// --- The operator provisions through the sealed surface: the team (the
+	// scoped signing key, bound to its account — D24) and daan's persona key
+	// (bound to its owner — D6 as amended) enter the vault and are never
+	// seen again; daan's creds leave through the loud escape (D7). The key
+	// imports ARE the declarations: no registry row exists anywhere.
 	ncAdmin, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(adminCreds))
 	if err != nil {
 		t.Fatalf("admin connect: %v", err)
@@ -197,19 +203,21 @@ jetstream { store_dir: %q }
 	if _, err := admin.Status(); err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(askSeed), accPub); err != nil {
+	if _, err := admin.ImportKey("acme", client.KindNATSAccountSigningKey, string(askSeed), accPub, ""); err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}
 	_, personaPriv, _ := ed25519.GenerateKey(nil)
 	personaSeed := base64.StdEncoding.EncodeToString(personaPriv.Seed())
-	personaEntry, err := admin.ImportKey(client.PersonaKeyName("daan"), client.KindPersonaSigningKey, personaSeed, "")
+	personaEntry, err := admin.ImportKey(client.PersonaKeyName("daan"), client.KindPersonaSigningKey, personaSeed, accPub, "daan")
 	if err != nil {
 		t.Fatalf("import persona key: %v", err)
 	}
-	if err := admin.PutIdentity(client.Identity{
-		Account: accPub, User: "daan", Personas: []string{"daan"}, Role: "acme/role",
-	}); err != nil {
-		t.Fatalf("declare identity: %v", err)
+	// A second persona, owned by ops — proof 1's foil: daan must not be able
+	// to sign with it.
+	_, opsPriv, _ := ed25519.GenerateKey(nil)
+	opsSeed := base64.StdEncoding.EncodeToString(opsPriv.Seed())
+	if _, err := admin.ImportKey(client.PersonaKeyName("ops"), client.KindPersonaSigningKey, opsSeed, accPub, "ops"); err != nil {
+		t.Fatalf("import ops persona key: %v", err)
 	}
 	minted, err := admin.MintCreds(accPub, "daan")
 	if err != nil {
@@ -247,11 +255,20 @@ jetstream { store_dir: %q }
 		t.Fatalf("observer flush: %v", err)
 	}
 
-	// The authorized flow: signature verifies against the persona public key.
-	canonical := []byte("canonical-record-bytes")
-	sig, err := daan.SignRecord("daan", canonical)
+	// The authorized flow, through the Signer seam's shape (soulstream M2's
+	// wiring point): the bound signer resolves its public key over
+	// keys.public and signs over sign.record.
+	signer, err := daan.PersonaSigner("daan")
 	if err != nil {
-		t.Fatalf("allowed act-as refused: %v", err)
+		t.Fatalf("persona signer: %v", err)
+	}
+	if signer.PublicKey() != personaEntry.PublicKey {
+		t.Fatalf("signer public key %q, want %q", signer.PublicKey(), personaEntry.PublicKey)
+	}
+	canonical := []byte("canonical-record-bytes")
+	sig, err := signer.Sign(canonical)
+	if err != nil {
+		t.Fatalf("owner signing refused: %v", err)
 	}
 	personaPub, _ := base64.StdEncoding.DecodeString(personaEntry.PublicKey)
 	rawSig, _ := base64.StdEncoding.DecodeString(sig)
@@ -259,13 +276,19 @@ jetstream { store_dir: %q }
 		t.Fatal("signature does not verify against the persona key")
 	}
 
-	// --- Proof 1 [measured]: unauthorized act-as is refused and logged.
-	if _, err := daan.SignRecord("other", canonical); err == nil ||
-		!strings.Contains(err.Error(), "may not act as") {
-		t.Fatalf("unauthorized act-as must refuse, got: %v", err)
+	// --- Proof 1 [measured]: signing with a persona the caller does not own
+	// — a key that exists, bound to ops — is refused and logged; a missing
+	// key refuses identically.
+	if _, err := daan.SignRecord("ops", canonical); err == nil ||
+		!strings.Contains(err.Error(), "no persona key") {
+		t.Fatalf("non-owner signing must refuse, got: %v", err)
 	}
-	if !strings.Contains(audit.String(), "may not act as") {
-		t.Fatal("the act-as refusal is not in the audit log")
+	if _, err := daan.SignRecord("ghost", canonical); err == nil ||
+		!strings.Contains(err.Error(), "no persona key") {
+		t.Fatalf("missing-key signing must refuse identically, got: %v", err)
+	}
+	if !strings.Contains(audit.String(), "no persona key") {
+		t.Fatal("the owner-binding refusal is not in the audit log")
 	}
 
 	// --- Proof 2 [measured]: the captured request is ciphertext — the sealed
@@ -305,6 +328,28 @@ jetstream { store_dir: %q }
 	}
 	if diff := strings.TrimPrefix(audit.String(), auditBefore); strings.Contains(diff, "keys.list") {
 		t.Fatalf("the cross-prefix request reached the service: %s", diff)
+	}
+
+	// --- Proof 5 [measured]: the op-tail gate (D25). daan publishes a
+	// management op on his OWN prefix; the scope template does not grant the
+	// op subject, so the server refuses the publish and the service records
+	// zero decisions — the admin boundary with no admin flag anywhere.
+	auditBefore = audit.String()
+	ownPrefixAdmin := client.New(ncDaan, accPub, "daan",
+		client.WithPrefix(e2ePrefix), client.WithTimeout(1500*time.Millisecond))
+	if _, err := ownPrefixAdmin.Keys(); err == nil {
+		t.Fatal("a represented user reached keys.list on its own prefix")
+	}
+	select {
+	case err := <-violations:
+		if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") {
+			t.Fatalf("expected a permissions violation, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("own-prefix management op drew no permission violation")
+	}
+	if diff := strings.TrimPrefix(audit.String(), auditBefore); strings.Contains(diff, "keys.list") {
+		t.Fatalf("the op-tail-refused request reached the service: %s", diff)
 	}
 
 	// --- Proof 3 [measured]: the vault's stream holds ciphertext only at

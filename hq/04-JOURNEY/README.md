@@ -17,6 +17,27 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-29)
 
+**The identity registry is dissolved — authorization lives in the ACLs
+and the bindings** ([episode 0013](0013-the-registry-dissolves.md); D25 in
+[`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), amending
+D2/D5/D6/D18/D22/D24): the operator's one-identity-one-persona question
+unwound the ledger field by field. Persona keys carry their owner
+(account, user) at import and `sign.record`/`keys.public` check the
+caller against the binding; every mint resolves its signing key by the
+target account's D24 team binding (ambiguity refuses); the management ops
+are gated by the server's own permission enforcement on the op tail —
+`requireAdmin`, the `admin` flag, `identities.*`, and `internal/registry`
+are deleted; mint is an operator op (self-mint died with the row that
+authorized it). The token store is the one registry standing. All three
+e2e gates re-proven on the new shape [measured], including the new
+op-tail proof (a represented user publishing a management op on its own
+prefix: server-refused, zero service decisions) and the revocation bound
+(re-admitted 5.25 s after connect at a 5 s TTL). The client now carries
+the M2 seam surface: `PersonaSigner` satisfies soulstream's
+`identity.Signer` structurally, exercised in the M3 rig. Next: **M2 —
+consumers wire in** (the cross-repo gate proof, then the remote MCP
+node).
+
 **The Entra/OIDC lane is open — role == team, no mapping store**
 ([episode 0012](0012-entra-role-claim-lane.md); D23–D24 in
 [`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), built as
@@ -143,3 +164,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0010 | [M4: auth callout ships, the front door opens](0010-m4-auth-callout-ships.md) |
 | 0011 | [The shared subject prefix: one namespace for the ecosystem](0011-the-shared-subject-prefix.md) |
 | 0012 | [The Entra lane: role == team, no mapping store](0012-entra-role-claim-lane.md) |
+| 0013 | [The registry dissolves: authorization in the ACLs and the bindings](0013-the-registry-dissolves.md) |

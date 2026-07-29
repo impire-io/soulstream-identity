@@ -1,6 +1,7 @@
 // The callout-management ops (hq/02-DESIGN/auth-callout.md D21/D22): API
 // tokens issued and revoked over the sealed surface, and the sentinel minted
-// from the AUTH signing key the vault holds. All admin-gated (D18).
+// from the AUTH signing key the vault holds. All operator ops — the
+// deployment's permission template gates who reaches them (D25).
 
 package service
 
@@ -51,9 +52,6 @@ func (s *Service) requireCallout() error {
 }
 
 func (s *Service) dispatchCallout(account, user, op string, body []byte) (any, error) {
-	if err := s.requireAdmin(account, user, op); err != nil {
-		return nil, err
-	}
 	if err := s.requireCallout(); err != nil {
 		return nil, err
 	}
@@ -63,12 +61,13 @@ func (s *Service) dispatchCallout(account, user, op string, body []byte) (any, e
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		// A token for an identity the registry does not declare would only
-		// ever be refused at callout time; refuse the mistake at issuance.
-		if _, ok, err := s.reg.Get(req.Account, req.User); err != nil {
+		// A token for an account no team is bound to would only ever be
+		// refused at callout time; refuse the mistake at issuance (D25).
+		if _, err := s.vault.TeamForAccount(req.Account); err != nil {
 			return nil, err
-		} else if !ok {
-			return nil, fmt.Errorf("service: identity %s/%s is not registered", req.Account, req.User)
+		}
+		if req.User == "" {
+			return nil, errors.New("service: a token names its user")
 		}
 		token, digest, err := callout.NewToken()
 		if err != nil {

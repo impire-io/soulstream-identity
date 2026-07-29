@@ -1,7 +1,6 @@
 package callout
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,12 +8,12 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// harness: an issuer over a MemStore vault (role key + AUTH signing key), a
-// registry with one identity, and a token store with one live token.
+// harness: an issuer over a MemStore vault (a team bound to its account —
+// the authorize source, D25 — plus the AUTH signing key) and a token store
+// with one live token naming an identity in the bound account.
 func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string, string) {
 	t.Helper()
 	firstKP, _ := nkeys.CreateCurveKeys()
@@ -27,23 +26,16 @@ func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string,
 	accPub, _ := accKP.PublicKey()
 	roleKP, _ := nkeys.CreateAccount()
 	roleSeed, _ := roleKP.Seed()
-	if _, err := v.Import("acme/role", vault.KindNATSAccountSigningKey, string(roleSeed), accPub); err != nil {
-		t.Fatalf("import role: %v", err)
+	if _, err := v.Import("acme", vault.KindNATSAccountSigningKey, string(roleSeed), accPub, ""); err != nil {
+		t.Fatalf("import team: %v", err)
 	}
 	authAccKP, _ := nkeys.CreateAccount()
 	authAccPub, _ := authAccKP.PublicKey()
 	authKP, _ := nkeys.CreateAccount()
 	authSeed, _ := authKP.Seed()
-	authEntry, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed), authAccPub)
+	authEntry, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed), authAccPub, "")
 	if err != nil {
 		t.Fatalf("import auth key: %v", err)
-	}
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
-	if err := reg.Put(registry.Identity{Account: accPub, User: "daan", Role: "acme/role"}); err != nil {
-		t.Fatalf("register: %v", err)
 	}
 	tokens := NewMemTokenStore()
 	token, digest, err := NewToken()
@@ -53,7 +45,7 @@ func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string,
 	if err := tokens.Create(digest, Record{Account: accPub, User: "daan", Label: "test"}); err != nil {
 		t.Fatalf("store token: %v", err)
 	}
-	iss, err := NewIssuer(v, reg, tokens, "auth/issuer", time.Minute, calloutSeed, nil)
+	iss, err := NewIssuer(v, tokens, "auth/issuer", time.Minute, calloutSeed, nil)
 	if err != nil {
 		t.Fatalf("issuer: %v", err)
 	}

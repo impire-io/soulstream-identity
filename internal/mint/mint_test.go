@@ -1,7 +1,6 @@
 package mint
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,13 +8,12 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// harness: a vault holding one account signing key and a registry with one
-// identity whose role names it.
-func harness(t *testing.T) (*vault.Vault, *registry.Registry, string, string) {
+// harness: a vault holding one team — an account signing key bound to its
+// account (D24) — the authorize source of every mint path (D25).
+func harness(t *testing.T) (*vault.Vault, string, string) {
 	t.Helper()
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
@@ -23,31 +21,22 @@ func harness(t *testing.T) (*vault.Vault, *registry.Registry, string, string) {
 	if err != nil {
 		t.Fatalf("vault: %v", err)
 	}
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 
 	accKP, _ := nkeys.CreateAccount()
 	accPub, _ := accKP.PublicKey()
 	askKP, _ := nkeys.CreateAccount() // signing keys are account-typed nkeys
 	askSeed, _ := askKP.Seed()
-	askEntry, err := v.Import("acme/persona-role", vault.KindNATSAccountSigningKey, string(askSeed), accPub)
+	askEntry, err := v.Import("acme", vault.KindNATSAccountSigningKey, string(askSeed), accPub, "")
 	if err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}
-
-	id := registry.Identity{Account: accPub, User: "daan", Personas: []string{"daan"}, Role: "acme/persona-role"}
-	if err := reg.Put(id); err != nil {
-		t.Fatalf("register identity: %v", err)
-	}
-	return v, reg, accPub, askEntry.PublicKey
+	return v, accPub, askEntry.PublicKey
 }
 
 func TestMintIssuesScopedUserJWT(t *testing.T) {
-	v, reg, accPub, askPub := harness(t)
+	v, accPub, askPub := harness(t)
 
-	res, err := Mint(v, reg, accPub, "daan")
+	res, err := Mint(v, accPub, "daan")
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
@@ -69,7 +58,7 @@ func TestMintIssuesScopedUserJWT(t *testing.T) {
 	}
 
 	// A second mint reuses the vaulted user key: same subject, stable identity.
-	res2, err := Mint(v, reg, accPub, "daan")
+	res2, err := Mint(v, accPub, "daan")
 	if err != nil {
 		t.Fatalf("re-Mint: %v", err)
 	}
@@ -79,36 +68,34 @@ func TestMintIssuesScopedUserJWT(t *testing.T) {
 }
 
 func TestMintRefusals(t *testing.T) {
-	v, reg, accPub, _ := harness(t)
+	v, accPub, _ := harness(t)
 
-	if _, err := Mint(v, reg, accPub, "ghost"); err == nil {
-		t.Fatal("minted for an unregistered identity")
+	// An account no team is bound to: refused (D25 — the binding is the
+	// authorize source; there is nothing else to consult).
+	strayKP, _ := nkeys.CreateAccount()
+	strayPub, _ := strayKP.PublicKey()
+	if _, err := Mint(v, strayPub, "daan"); err == nil {
+		t.Fatal("minted for an account with no bound team")
 	}
-	// A role naming a user key (not an account signing key) is refused.
-	if _, err := v.GenerateUserKey("stray-user-key"); err != nil {
-		t.Fatalf("generate: %v", err)
+
+	// A second team bound to the same account: ambiguous, refused (the D5
+	// amendment's reversal condition watches this refusal).
+	ask2KP, _ := nkeys.CreateAccount()
+	ask2Seed, _ := ask2KP.Seed()
+	if _, err := v.Import("acme-2", vault.KindNATSAccountSigningKey, string(ask2Seed), accPub, ""); err != nil {
+		t.Fatalf("import second team: %v", err)
 	}
-	if err := reg.Put(registry.Identity{Account: accPub, User: "misroled", Role: "stray-user-key"}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if _, err := Mint(v, reg, accPub, "misroled"); err == nil {
-		t.Fatal("minted with a user key as role")
-	}
-	// No role at all: refused with guidance.
-	if err := reg.Put(registry.Identity{Account: accPub, User: "roleless"}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if _, err := Mint(v, reg, accPub, "roleless"); err == nil || !strings.Contains(err.Error(), "role") {
-		t.Fatalf("roleless mint error should name the role, got %v", err)
+	if _, err := Mint(v, accPub, "daan"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("two bound teams must refuse as ambiguous, got %v", err)
 	}
 }
 
 func TestMintForKeyIssuesEphemeralScopedJWT(t *testing.T) {
-	v, reg, accPub, askPub := harness(t)
+	v, accPub, askPub := harness(t)
 	ukp, _ := nkeys.CreateUser()
 	upub, _ := ukp.PublicKey()
 
-	token, err := ForKey(v, reg, accPub, "daan", upub, time.Minute)
+	token, err := ForKey(v, accPub, "daan", upub, time.Minute)
 	if err != nil {
 		t.Fatalf("MintForKey: %v", err)
 	}
@@ -129,20 +116,22 @@ func TestMintForKeyIssuesEphemeralScopedJWT(t *testing.T) {
 		t.Fatalf("ephemeral JWT must expire in the future, got %d", uc.Expires)
 	}
 
-	if _, err := ForKey(v, reg, accPub, "daan", "not-a-key", time.Minute); err == nil {
+	if _, err := ForKey(v, accPub, "daan", "not-a-key", time.Minute); err == nil {
 		t.Fatal("bad public key accepted")
 	}
-	if _, err := ForKey(v, reg, accPub, "daan", upub, 0); err == nil {
+	if _, err := ForKey(v, accPub, "daan", upub, 0); err == nil {
 		t.Fatal("zero ttl accepted — an unbounded ephemeral credential")
 	}
-	if _, err := ForKey(v, reg, accPub, "ghost", upub, time.Minute); err == nil {
-		t.Fatal("minted for an unregistered identity")
+	strayKP, _ := nkeys.CreateAccount()
+	strayPub, _ := strayKP.PublicKey()
+	if _, err := ForKey(v, strayPub, "daan", upub, time.Minute); err == nil {
+		t.Fatal("minted for an account with no bound team")
 	}
 }
 
 func TestExportCredsIsACompleteCredsFile(t *testing.T) {
-	v, reg, accPub, _ := harness(t)
-	res, err := Mint(v, reg, accPub, "daan")
+	v, accPub, _ := harness(t)
+	res, err := Mint(v, accPub, "daan")
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}

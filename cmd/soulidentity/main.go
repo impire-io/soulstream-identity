@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/impire-io/soulidentity/client"
 	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/service"
 	"github.com/impire-io/soulidentity/internal/vault"
 	"github.com/impire-io/soulidentity/internal/version"
@@ -35,15 +33,14 @@ import (
 const usage = `soulidentity — the identity plane, served over NATS
 
 Usage:
-  soulidentity serve    [conn] [--registry PATH] [--bucket NAME]     run the service
+  soulidentity serve    [conn] [--bucket NAME]                       run the service
                         [--callout-creds F | --callout-context C]    …as callout issuer (M4):
                         [--auth-key NAME] [--token-bucket NAME] [--callout-ttl DUR]
   soulidentity keygen                              mint an xkey seed (seed on stdout)
   soulidentity status   [conn]                     probe the service
   soulidentity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
+                            [--account A] [--user U]   the binding (team / persona owner, D24/D25)
   soulidentity key ls       [conn] --as A/U
-  soulidentity identity add [conn] --as A/U --account A --user U [--personas p1,p2] [--role R] [--admin]
-  soulidentity identity ls  [conn] --as A/U
   soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
   soulidentity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
   soulidentity token ls     [conn] --as A/U
@@ -53,7 +50,11 @@ Usage:
 
 Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
 --as is the principal (<account-public-key>/<user>) the connection is
-authenticated as; the server refuses mismatched prefixes (D15).
+authenticated as; the server refuses mismatched prefixes (D15). The same
+enforcement gates the ops themselves: management (keys.*, tokens.*, mint,
+sentinel) is reachable only for credentials whose permission template
+grants those op subjects — represented users get sign.record and
+keys.public on their own prefix, nothing more (D25).
 Serve reads its xkey seeds from SOULIDENTITY_FIRST_KEY,
 SOULIDENTITY_SURFACE_KEY and (callout, optional) SOULIDENTITY_CALLOUT_KEY;
 the matching flags are accepted but argv is visible in the process table —
@@ -85,8 +86,6 @@ func run(args []string, out, errw io.Writer) int {
 		err = cmdStatus(rest, out)
 	case "key":
 		err = cmdKey(rest, out)
-	case "identity":
-		err = cmdIdentity(rest, out)
 	case "mint":
 		err = cmdMint(rest, out)
 	case "token":
@@ -106,14 +105,6 @@ func run(args []string, out, errw io.Writer) int {
 		return 1
 	}
 	return 0
-}
-
-func defaultDataDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "soulidentity"
-	}
-	return filepath.Join(dir, "soulidentity")
 }
 
 // connFlags registers the connection flags shared by every NATS-speaking
@@ -208,7 +199,6 @@ func stringFromFlagOrEnv(flagVal, envName string) string {
 func cmdServe(args []string, errw io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	cf := addConnFlags(fs)
-	registryPath := fs.String("registry", filepath.Join(defaultDataDir(), "registry.json"), "registry file (declared identities)")
 	bucket := fs.String("bucket", "SOULIDENTITY_VAULT", "KV bucket holding the sealed vault")
 	firstKey := fs.String("first-key", "", "vault first key seed (SX…); prefer SOULIDENTITY_FIRST_KEY")
 	surfaceKey := fs.String("surface-key", "", "surface xkey seed (SX…); prefer SOULIDENTITY_SURFACE_KEY")
@@ -263,10 +253,6 @@ func cmdServe(args []string, errw io.Writer) error {
 	if err := v.Verify(); err != nil {
 		return err
 	}
-	reg, err := registry.Open(*registryPath)
-	if err != nil {
-		return err
-	}
 	log := slog.New(slog.NewTextHandler(errw, nil))
 
 	// The callout half: a second connection, authenticated in the AUTH
@@ -307,7 +293,7 @@ func cmdServe(args []string, errw io.Writer) error {
 			}
 			issOpts = append(issOpts, callout.WithOIDC(oidcVal))
 		}
-		issuer, err := callout.NewIssuer(v, reg, store, *authKey, *calloutTTL, calloutSeed, log, issOpts...)
+		issuer, err := callout.NewIssuer(v, store, *authKey, *calloutTTL, calloutSeed, log, issOpts...)
 		if err != nil {
 			return err
 		}
@@ -323,7 +309,7 @@ func cmdServe(args []string, errw io.Writer) error {
 		return err
 	}
 	svcOpts = append(svcOpts, service.WithPrefix(*cf.prefix))
-	svc, err := service.New(v, reg, surfaceSeed, log, svcOpts...)
+	svc, err := service.New(v, surfaceSeed, log, svcOpts...)
 	if err != nil {
 		return err
 	}
@@ -334,7 +320,7 @@ func cmdServe(args []string, errw io.Writer) error {
 	// The root is logged deliberately: a consumer with a mismatched prefix
 	// sees timeouts, and this line is where the mismatch is diagnosed.
 	log.Info("service serving", "subjects", svc.Root()+".>", "bucket", *bucket,
-		"registry", *registryPath, "version", version.Version)
+		"version", version.Version)
 	<-ctx.Done()
 	_ = sub.Drain()
 	if ncCallout != nil {
@@ -488,7 +474,8 @@ func cmdKey(args []string, out io.Writer) error {
 		as := asFlag(fs)
 		name := fs.String("name", "", "vault name for the key")
 		kind := fs.String("kind", "", "key kind")
-		account := fs.String("account", "", "account public key (A…) an account signing key signs for — the team's binding (D24)")
+		account := fs.String("account", "", "binding account public key (A…): the account a signing key signs for (D24), or a persona key's owner account (D25)")
+		user := fs.String("user", "", "binding user name: a persona key's owner within --account (D25)")
 		seedFile := fs.String("seed-file", "", "file holding the seed")
 		seedStdin := fs.Bool("seed-stdin", false, "read the seed from stdin")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -516,7 +503,7 @@ func cmdKey(args []string, out io.Writer) error {
 			return err
 		}
 		defer done()
-		entry, err := c.ImportKey(*name, *kind, secret, *account)
+		entry, err := c.ImportKey(*name, *kind, secret, *account, *user)
 		if err != nil {
 			return err
 		}
@@ -544,65 +531,6 @@ func cmdKey(args []string, out io.Writer) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown key subcommand %q", args[0])
-	}
-}
-
-func cmdIdentity(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("identity needs a subcommand: add | ls")
-	}
-	switch args[0] {
-	case "add":
-		fs := flag.NewFlagSet("identity add", flag.ContinueOnError)
-		cf := addConnFlags(fs)
-		as := asFlag(fs)
-		account := fs.String("account", "", "NATS account public key (A…) of the identity")
-		user := fs.String("user", "", "user name within the account")
-		personas := fs.String("personas", "", "comma-separated personas this identity may act as")
-		role := fs.String("role", "", "vault name of the account signing key that mints for this identity")
-		admin := fs.Bool("admin", false, "declare an admin identity (manages vault and registry)")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		id := client.Identity{Account: *account, User: *user, Role: *role, Admin: *admin}
-		if *personas != "" {
-			for _, p := range strings.Split(*personas, ",") {
-				id.Personas = append(id.Personas, strings.TrimSpace(p))
-			}
-		}
-		c, done, err := newClient(cf, *as)
-		if err != nil {
-			return err
-		}
-		defer done()
-		if err := c.PutIdentity(id); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "declared %s/%s\n", id.Account, id.User)
-		return nil
-	case "ls":
-		fs := flag.NewFlagSet("identity ls", flag.ContinueOnError)
-		cf := addConnFlags(fs)
-		as := asFlag(fs)
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		c, done, err := newClient(cf, *as)
-		if err != nil {
-			return err
-		}
-		defer done()
-		ids, err := c.Identities()
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			fmt.Fprintf(out, "%s/%s\tpersonas=%s\trole=%s\tadmin=%v\n",
-				id.Account, id.User, strings.Join(id.Personas, ","), id.Role, id.Admin)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unknown identity subcommand %q", args[0])
 	}
 }
 

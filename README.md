@@ -41,31 +41,38 @@ export SOULIDENTITY_FIRST_KEY=$(soulidentity keygen)
 export SOULIDENTITY_SURFACE_KEY=$(soulidentity keygen)
 
 # Run the service on its NATS connection (creds file = the bypass lane).
-# The vault lives in a KV bucket, sealed; the registry file declares who
-# exists — including the first admin row:
-soulidentity serve --creds-file ./service.creds --registry ./registry.json &
+# The vault lives in a KV bucket, sealed. There is no registry: who may
+# reach which op is your permission templates (the operator's creds carry
+# the management ops; represented users get sign.record + keys.public).
+soulidentity serve --creds-file ./service.creds &
 
-# As an admin identity, load your account's (scoped) signing key:
+# As the operator, declare the team: the account's (scoped) signing key,
+# bound to the account it signs for — the binding IS the declaration:
 soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
-  --name acme-persona-role --kind nats-account-signing-key --seed-file ./SA.nk
+  --name acme --kind nats-account-signing-key --account AC...PUBKEY \
+  --seed-file ./SA.nk
 
-# Register an identity: who it is, which personas it may act as,
-# which role (vault key) mints its credentials:
-soulidentity identity add --creds-file ./ops.creds --as AC...PUBKEY/ops \
-  --account AC...PUBKEY --user daan --personas daan,smith --role acme-persona-role
+# Declare daan's persona key, bound to its owner — one identity, one persona:
+soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
+  --name persona/daan --kind persona-signing-key \
+  --account AC...PUBKEY --user daan --seed-file ./daan-persona.nk
 
-# Mint daan's creds (the explicit custody escape — self-custody onboarding):
+# Mint daan's creds (the explicit custody escape — self-custody onboarding);
+# the signing key resolves by the account's team binding:
 soulidentity mint --creds-file ./ops.creds --as AC...PUBKEY/ops \
   --account AC...PUBKEY --user daan --creds > daan.creds
 ```
 
-Signing a Soulstream record from Go — the persona key never leaves the vault,
-and the service enforces who may act as which persona:
+Signing a Soulstream record from Go — the persona key never leaves the
+vault, and the key's owner binding decides who may sign with it. The bound
+signer satisfies soulstream's `identity.Signer` seam structurally (neither
+repo imports the other):
 
 ```go
 nc, _ := nats.Connect(url, nats.UserCredentials("daan.creds"))
 c := client.New(nc, "AC...PUBKEY", "daan")
-sig, _ := c.SignRecord("daan", canonicalBytes)
+signer, _ := c.PersonaSigner("daan") // PublicKey() + Sign(canonical)
+sig, _ := signer.Sign(canonicalBytes)
 ```
 
 ## What it is not
@@ -77,7 +84,10 @@ authn backends plug into callout mode), not an authorization server for your
 realm (NATS enforces transport permissions via scoped signing keys or auth
 callout; SoulIdentity decides only who may act as which persona), and not a
 place secrets leave: credential export exists solely as an explicit, named
-custody escape.
+custody escape. There is no identity ledger either: authorization lives in
+the transport ACLs (which ops a credential reaches) and the vault's key
+bindings (which account a team key signs for, which identity owns a
+persona key).
 
 ## Status
 

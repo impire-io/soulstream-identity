@@ -30,12 +30,15 @@ The NATS server enforces; SoulIdentity decides only what is genuinely its own.
 
 - Transport permissions live NATS-side — in scoped signing keys (mint mode) or
   callout-issued JWTs (callout mode) — and are enforced by the server on every
-  connection. SoulIdentity MUST NOT build a parallel enforcement path that
-  duplicates what the server already checks.
-- SoulIdentity's own policy surface is exactly: which identity exists, which
-  personas it may act as, which role mints for it — whether declared in the
-  registry or derived from validated claims in the presented credential
-  (D2). Act-as policy is ours; pub/sub permissions are not.
+  connection, including which service ops a principal may reach (the op tail
+  of the subject, D25). SoulIdentity MUST NOT build a parallel enforcement
+  path that duplicates what the server already checks.
+- SoulIdentity's own policy surface is exactly the declared bindings (D25):
+  which account a team key signs for (D24), which identity owns a persona
+  key (D6 as amended) — and, for external credentials, the token record
+  naming the identity (D22) or the validated claim naming the team
+  (D23/D24). Signing policy is the binding; who exists is what the bindings
+  and records state; pub/sub permissions are not ours.
 - Validations the server will repeat (e.g. signing-key ↔ account binding) are
   diagnostics — warn-level conveniences, never gates. A mis-bound key fails
   closed at the server; that is the design, not a gap.
@@ -44,7 +47,7 @@ The NATS server enforces; SoulIdentity decides only what is genuinely its own.
 already carries membership (issuer_account), permissions (scopes), and
 rejection of bad bindings; duplicating any of it would eventually contradict
 it. Aligning with the native model is also what keeps both enforcement modes
-— minted and callout — coherent on one registry.
+— minted and callout — coherent on one declared team set.
 
 ### III. Smallest Viable Implementation
 
@@ -54,7 +57,7 @@ it. Aligning with the native model is also what keeps both enforcement modes
   layers, or plugin points added "for later". The storage-backend seam and the
   authn-backend seam exist because the design names their concrete future
   backends; nothing else gets a seam in advance.
-- Growth is new modes and backends on the same vault + registry, never new
+- Growth is new modes and backends on the same vault + token store, never new
   machinery beside them. If an addition doesn't survive the founding bet's
   list staying short, it becomes a backend or it goes nowhere.
 - Scope creep is a review blocker, not a style concern.
@@ -144,9 +147,19 @@ change, a scope call, or a public claim.
   principle; MINOR — a new principle or section, or materially expanded
   guidance; PATCH — clarifications.
 
-**Version**: 1.2.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-28
+**Version**: 1.3.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-29
 
 *Amendment history:*
+- *1.3.0 (2026-07-29)* — the registry dissolves (journey
+  [0013](../04-JOURNEY/0013-the-registry-dissolves.md), D25): Principle II's
+  policy-surface bullet is restated as the declared bindings — team keys
+  carry their account (D24), persona keys their owner (D6 as amended), the
+  token record and the validated claim name the external identities — and
+  the server's enforcement is acknowledged to cover the op tail of the
+  subject, so management needs no admin flag. Principle III's growth bullet
+  names the vault + token store; the separate identity registry is deleted
+  as the second source of truth II has always warned against. Principles
+  I–IV otherwise unchanged (MINOR).
 - *1.2.0 (2026-07-28)* — the connection ladder (journey
   [0003](../04-JOURNEY/0003-nats-only-and-the-connection-ladder.md)):
   NATS becomes the *only* transport — the Unix socket is dropped entirely

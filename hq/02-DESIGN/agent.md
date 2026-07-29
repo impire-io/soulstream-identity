@@ -103,6 +103,19 @@ deliberately, per backend. The one inference-shaped problem that remains —
 does this signing key actually belong to that account? — is still not ours
 to enforce:
 
+*Amended 2026-07-29 (journey 0013): the principle survives, the ledger
+retires.* "Declared, never guessed" was never about the registry *file* —
+it was about there being a declared fact behind every decision. Those facts
+now live in the artifacts that already exist (D25): a **token record**
+declares the token lane's identity (created admin-gated, D22), a **key
+binding** declares a team (D24) and a persona's owner (D6 as amended), a
+**permission template** declares which ops a principal reaches (D15
+extended). A separate identity ledger restated facts the bindings already
+carry — deleted as the second source of truth this document has warned
+against since D4. Identity remains keyed by (account, user); one persona
+per identity, a human and an agent equally unique — Soulstream's own
+"credentials are how processes connect; personas are who is speaking".
+
 ## D3 — Binding verification is diagnostic, optional, never a gate
 
 The NATS server is the verifier of record: a user JWT minted from a key that
@@ -158,6 +171,19 @@ names the vault key). The registry then holds only what is genuinely
 Soulstream-level: **which identity may act as which persona**. Transport
 permissions native, act-as policy ours.
 
+*Amended 2026-07-29 (journey 0013): the role selector is gone; role == team
+== the bound signing key.* D24 collapsed role and team for the claims lane
+("the role value IS the team name"); with the registry dissolved (D25) the
+collapse is total: every mint resolves its signing key **by the target
+account's D24 binding** — the unique vault account signing key bound to
+that account; none refuses, more than one refuses as ambiguous. The `role`
+field had no second value left to select. **Reversal condition**: a
+deployment needing two permission scopes inside one account (observable: a
+second signing key imported for an already-bound account, refused as
+ambiguous, recorded as an issue) reopens role selection as a new
+D-decision — as declared configuration, never a field on a token record
+(D22's watch).
+
 ## D6 — Act-as is the runtime shadow of `operated_by`
 
 Soulstream 014 made operator accountability a countersigned, static claim
@@ -167,6 +193,22 @@ persona, every signature request is checked against it and logged. The agent
 is also the natural issuer of attestation tokens — the operator's key lives
 here. Static claim in the registry (the realm's), runtime enforcement in the
 agent (the operator's).
+
+*Amended 2026-07-29 (journey 0013): the act-as list is superseded by the
+key's owner binding; the accountability frame stands.* Soulstream's own
+identity design refuses the fan-out the list allowed: a persona is the one
+noun for any identity — human, agent, or job — an agent acting on someone's
+behalf gets *its own* persona, and there is deliberately no `on_behalf_of`.
+So the grant is not a list, it is ownership: a persona signing key carries
+its **owner identity (account, user)** at import, the exact D24 move for
+team keys, and `sign.record` checks the caller against the binding — still
+checked on every request, still logged against the server-proven principal
+(D15). One identity, one persona; ghostwriting through the oracle is not a
+thing this design does. **Reversal condition**: a real consumer need for
+one connection signing as a persona it does not own (observable: a consumer
+blocked on a refused `sign.record`, recorded as an issue) adds delegation
+as an explicit second binding *on the key* — never a registry list — as a
+new D-decision.
 
 ## D7 — Custody is honest, and export is explicit
 

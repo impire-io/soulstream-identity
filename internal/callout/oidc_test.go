@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulidentity/internal/oidcstub"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
@@ -52,26 +50,22 @@ func oidcHarness(t *testing.T) (*Issuer, *oidcstub.Stub, *auditBuf, string) {
 	engAccPub, _ := engAccKP.PublicKey()
 	engKP, _ := nkeys.CreateAccount()
 	engSeed, _ := engKP.Seed()
-	if _, err := v.Import("engineering", vault.KindNATSAccountSigningKey, string(engSeed), engAccPub); err != nil {
+	if _, err := v.Import("engineering", vault.KindNATSAccountSigningKey, string(engSeed), engAccPub, ""); err != nil {
 		t.Fatalf("import engineering: %v", err)
 	}
 	platAccKP, _ := nkeys.CreateAccount()
 	platAccPub, _ := platAccKP.PublicKey()
 	platKP, _ := nkeys.CreateAccount()
 	platSeed, _ := platKP.Seed()
-	if _, err := v.Import("platform", vault.KindNATSAccountSigningKey, string(platSeed), platAccPub); err != nil {
+	if _, err := v.Import("platform", vault.KindNATSAccountSigningKey, string(platSeed), platAccPub, ""); err != nil {
 		t.Fatalf("import platform: %v", err)
 	}
 	authAccKP, _ := nkeys.CreateAccount()
 	authAccPub, _ := authAccKP.PublicKey()
 	authKP, _ := nkeys.CreateAccount()
 	authSeed, _ := authKP.Seed()
-	if _, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed), authAccPub); err != nil {
+	if _, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed), authAccPub, ""); err != nil {
 		t.Fatalf("import auth key: %v", err)
-	}
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
 	}
 
 	stub, err := oidcstub.New("soulidentity-test-client")
@@ -84,7 +78,7 @@ func oidcHarness(t *testing.T) (*Issuer, *oidcstub.Stub, *auditBuf, string) {
 		t.Fatalf("oidc validator: %v", err)
 	}
 	audit := &auditBuf{}
-	iss, err := NewIssuer(v, reg, NewMemTokenStore(), "auth/issuer", time.Minute, "",
+	iss, err := NewIssuer(v, NewMemTokenStore(), "auth/issuer", time.Minute, "",
 		slog.New(slog.NewTextHandler(audit, nil)), WithOIDC(val))
 	if err != nil {
 		t.Fatalf("issuer: %v", err)

@@ -12,7 +12,6 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
@@ -27,26 +26,15 @@ type Result struct {
 	UserPublicKey string `json:"user_public_key"`
 }
 
-// roleKey resolves the registered identity's role to its vault signing key.
-func roleKey(v *vault.Vault, reg *registry.Registry, account, user string) (nkeys.KeyPair, error) {
-	id, ok, err := reg.Get(account, user)
+// teamKey resolves the signing key for account by its D24 binding — the
+// authorize step of every mint path since the registry dissolved (D25,
+// D5 as amended): the team the account binds to is the only role there is.
+func teamKey(v *vault.Vault, account string) (nkeys.KeyPair, error) {
+	e, err := v.TeamForAccount(account)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mint: %w", err)
 	}
-	if !ok {
-		return nil, fmt.Errorf("mint: identity %s/%s is not registered", account, user)
-	}
-	if id.Role == "" {
-		return nil, fmt.Errorf("mint: identity %s/%s has no role — register it with the vault name of an account signing key", account, user)
-	}
-	role, err := v.Get(id.Role)
-	if err != nil {
-		return nil, fmt.Errorf("mint: role of %s/%s: %w", account, user, err)
-	}
-	if role.Kind != vault.KindNATSAccountSigningKey {
-		return nil, fmt.Errorf("mint: role key %s is %q, want %q", id.Role, role.Kind, vault.KindNATSAccountSigningKey)
-	}
-	return v.KeyPair(id.Role)
+	return v.KeyPair(e.Name)
 }
 
 // claims builds the scoped user claims every mint path shares: the JWT
@@ -62,10 +50,11 @@ func claims(userPub, account, user string) *jwt.UserClaims {
 	return uc
 }
 
-// Mint issues a durable user JWT for the registered identity (account, user)
-// with the user key generated inside the vault and reused across mints.
-func Mint(v *vault.Vault, reg *registry.Registry, account, user string) (Result, error) {
-	kp, err := roleKey(v, reg, account, user)
+// Mint issues a durable user JWT for (account, user) — an operator act
+// (provisioning, ACL-gated per D25) — with the user key generated inside
+// the vault and reused across mints.
+func Mint(v *vault.Vault, account, user string) (Result, error) {
+	kp, err := teamKey(v, account)
 	if err != nil {
 		return Result{}, err
 	}
@@ -83,10 +72,11 @@ func Mint(v *vault.Vault, reg *registry.Registry, account, user string) (Result,
 // ForKey issues an ephemeral scoped user JWT for a caller-provided user
 // public key — the auth-callout path (hq/02-DESIGN/auth-callout.md D20),
 // where the key is server-assigned and no vault key exists or is created.
-// The authorize stage is the registry row (D22's registry-declared source);
-// ttl bounds the credential and is the revocation propagation bound (D22).
-func ForKey(v *vault.Vault, reg *registry.Registry, account, user, userPub string, ttl time.Duration) (string, error) {
-	kp, err := roleKey(v, reg, account, user)
+// The authorize stage is the target account's team binding (D22 as
+// amended, D25); ttl bounds the credential and is the revocation
+// propagation bound (D22).
+func ForKey(v *vault.Vault, account, user, userPub string, ttl time.Duration) (string, error) {
+	kp, err := teamKey(v, account)
 	if err != nil {
 		return "", err
 	}

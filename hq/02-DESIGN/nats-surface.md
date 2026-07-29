@@ -191,30 +191,74 @@ discovery, while the first key's rotation is a silent bucket re-seal walk
 domain couples those lifecycles and violates domain separation for no
 saving but one file.
 
-## D18 — Management is admin-gated in the registry
+## D18 — Management is admin-gated in the registry (superseded)
 
-*Decided during the M3 build (2026-07-28, journey 0007).* The socket's trust
-model — whoever owns the socket owns the agent (D8) — retired without a
-successor for the management ops: over NATS, *any* authenticated identity
-can reach its own subject prefix, so "who may manage the vault and declare
-identities" needs its own answer. The decision: **registry rows gain an
-`admin` flag** (additive, default false — existing files decode unchanged).
-Admin gates `keys.*`, `identities.*`, and minting for identities other than
-oneself; `sign.record` stays per-identity act-as (D6) and self-mint stays
-open to any registered identity. The first admin rows are operator-declared
-in the registry file — the same act as provisioning the service's creds,
-needing no service to exist yet, which is what makes the bootstrap
-non-circular.
+*Superseded 2026-07-29 (journey 0013, D25): there is no registry and no
+`admin` flag; the management ops are gated by the server's own permission
+enforcement on the op token of the subject — the same mechanism D15 uses
+for the principal.* Recorded for history: the socket's trust model —
+whoever owns the socket owns the agent (D8) — retired without a successor
+for the management ops: over NATS, *any* authenticated identity can reach
+its own subject prefix, so "who may manage the vault and declare
+identities" needed its own answer. The M3 decision: registry rows gained an
+`admin` flag; admin gated `keys.*`, `identities.*`, and minting for
+identities other than oneself. The alternative rejected then — an admin
+list in the service configuration — stayed rejected in the supersession:
+D25 moves the gate to a *third* place, the deployment's permission
+templates, which is where transport authorization already lived. The
+reversal condition written here (a second boolean beside `admin` forcing a
+role model) never fired; the flag went the other way — deleted with the
+ledger that held it.
 
-The alternative — an admin list in the service configuration — was rejected
-as a second policy source: the registry is where who-may-what lives (D2),
-and an identity's adminhood is a fact about the identity, not about one
-deployment's config file [judgment].
+## D25 — Authorization lives in the ACLs and the bindings
 
-**Reversal condition**: if admin turns out to need more than one grain —
-role sets accumulating in code as special cases (observable: a second
-boolean beside `admin` proposed for the same reason) — the flag gives way
-to a declared role model in the registry, as a new D-decision.
+*Decided 2026-07-29 at the operator's direction (journey 0013), dissolving
+the identity registry.* The question that killed the ledger: every identity
+is unique — a human and an agent equally — and the connection already
+proves (account, user); what does a registered row add? Answered field by
+field, nothing survived: `personas` fell to one-identity-one-persona (D6 as
+amended — the persona key carries its owner), `role` fell to role == team
+== the bound signing key (D5 as amended, D24), `admin` fell to the
+transport ACL, and bare existence was a restatement of the token store and
+the key bindings. Authorization now has exactly two homes:
+
+- **The transport ACL gates which ops a principal reaches.** The surface is
+  `<root>.<account>.<user>.<op>`; D15 already trusts the server's
+  publish-permission enforcement for the principal tokens, and this
+  decision extends the same trust to the **op tail**. A represented user's
+  scope template allows exactly the user ops
+  (`…{{account-subject()}}.{{name()}}.sign.record`, `…keys.public`); the
+  operator's credential allows the full op space (`keys.*`, `tokens.*`,
+  `mint`, `sentinel.mint`). A non-operator publishing an admin op is
+  refused by the server before the service ever sees it — zero service
+  decisions, the D15 proof extended [measured, M3-gate shape].
+- **The vault bindings gate the data-dependent decisions.** A team is an
+  account signing key bound to its account (D24); a persona key is bound
+  to its owner (account, user) (D6 as amended); `sign.record` and
+  `keys.public` check the caller against the binding; every mint resolves
+  its signing key by the target account's binding (D5 as amended).
+
+What remains declared (D2's principle, relocated): token records name the
+token lane's identities, bindings name teams and persona owners, permission
+templates name the op grants, and the OIDC lane stays claims-derived
+(D23/D24) — the one registry still standing is the **token store**, which
+was never policy (D22). Mint is an operator op: with no row to authorize
+self-mint, issuing durable credentials is provisioning, gated by the ACL
+like the rest of management — the D7 escape unchanged and loud.
+
+Stated honestly, as D15 demands: the admin boundary is now a deployment
+property — a permission template that grants a represented user the op
+tail `>` grants it management; the deployment docs must state the two
+required scope shapes, and the e2e proves the refusal. This is not new
+risk but the *same* trust class D15 accepted for the principal — there is
+no second verifier, and rebuilding one service-side would restore the
+ledger this decision deletes.
+
+**Reversal condition**: a deployment class whose permission templates
+cannot scope the op tail (observable: a scope template that cannot express
+per-op publish grammar, recorded as an issue — the NGS research is the
+first place this could surface) restores a service-side op gate keyed on
+declared configuration, as a new D-decision.
 
 ## The vault on KV
 
@@ -234,9 +278,9 @@ Realizing D10 + D13, proven mechanically in journey 0004 [measured]:
   double-seal a bucket. No migration tooling from the file keystore:
   milestone 1 shipped unreleased with no external consumers, so the file
   backend retires by deletion, not conversion [judgment].
-- The registry stays a local strict-decoded JSON file in M3: it is declared
-  configuration, not secret material — moving it to KV is a later
-  convenience, not part of this milestone (constitution III).
+- The registry stayed a local strict-decoded JSON file through M3/M4; it
+  was deleted with D25 (journey 0013) — the bindings in the vault and the
+  token store carry the declared facts now.
 
 ## Configuration surface
 
@@ -244,10 +288,12 @@ Realizing D10 + D13, proven mechanically in journey 0004 [measured]:
   NATS context; URL and creds path.
 - The two xkey seeds: one environment variable each (flag accepted), per
   D13's amendment and D17; operator keygen tooling mints them.
-- The registry file path.
 - Bucket name; the shared ecosystem prefix (`--prefix`, defaulting to
   `SOULSTREAM_PREFIX` — D14 as amended, one value across all soulstream
   components).
+- The permission templates are deployment configuration with a design
+  duty (D25): the represented-user scope grants only the user ops; the
+  operator credential grants the op space.
 
 ## Audit
 

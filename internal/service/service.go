@@ -2,9 +2,11 @@
 // request/reply on soulidentity.<account>.<user>.<op> with xkey-sealed payloads
 // (D16), plus the two open ops (status, xkey — D14). The principal is read off
 // the subject and is trustworthy because the server's publish-permission
-// enforcement already proved it (D15) — this package never re-verifies the
-// claim, it only applies SoulIdentity's own policy: who is admin, who may act
-// as which persona (D6), who may mint for whom.
+// enforcement already proved it (D15); the same enforcement gates the op tail —
+// which ops a principal may even publish is the deployment's permission
+// template (D25). This package never re-verifies either claim; it applies only
+// the data-dependent policy the ACL cannot express: the vault bindings — the
+// persona key's owner (D6 as amended), the account's team (D24).
 package service
 
 import (
@@ -19,7 +21,6 @@ import (
 
 	"github.com/impire-io/soulidentity/internal/callout"
 	"github.com/impire-io/soulidentity/internal/mint"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 	"github.com/impire-io/soulidentity/internal/version"
 )
@@ -65,15 +66,14 @@ func ValidatePrefix(prefix string) error {
 	return nil
 }
 
-// PersonaKeyPrefix is the vault-name convention binding a registry persona to
-// its signing key: persona <p> signs with vault key "persona/<p>". Act-as
-// (D6) is checked against exactly this binding.
+// PersonaKeyPrefix is the vault-name convention for persona signing keys:
+// persona <p> signs with vault key "persona/<p>". Who may sign with it is
+// the key's own owner binding (D6 as amended, D25).
 const PersonaKeyPrefix = "persona/"
 
-// Service wires the vault and registry behind the sealed NATS surface.
+// Service wires the vault behind the sealed NATS surface.
 type Service struct {
 	vault      *vault.Vault
-	reg        *registry.Registry
 	surface    nkeys.KeyPair
 	surfacePub string
 	log        *slog.Logger
@@ -118,7 +118,7 @@ func WithPrefix(prefix string) Option {
 
 // New builds the service around its surface key ("SX…" seed, deployment-
 // supplied — D17). A nil logger logs to a discarding handler.
-func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Logger, opts ...Option) (*Service, error) {
+func New(v *vault.Vault, surfaceSeed string, log *slog.Logger, opts ...Option) (*Service, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -130,7 +130,7 @@ func New(v *vault.Vault, r *registry.Registry, surfaceSeed string, log *slog.Log
 	if err != nil {
 		return nil, fmt.Errorf("service: surface key public half: %w", err)
 	}
-	s := &Service{vault: v, reg: r, surface: kp, surfacePub: pub, log: log, root: Segment}
+	s := &Service{vault: v, surface: kp, surfacePub: pub, log: log, root: Segment}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -178,17 +178,19 @@ type importKeyRequest struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
 	Secret string `json:"secret"`
-	// Account binds an account signing key to the account it signs for
-	// (required for that kind — the team object, D24); empty otherwise.
+	// The binding (D25): an account signing key requires Account — the
+	// account it signs for (the team object, D24); a persona signing key
+	// requires (Account, User) — its owner (D6 as amended); empty otherwise.
 	Account string `json:"account,omitempty"`
+	User    string `json:"user,omitempty"`
 }
 
 type keysResponse struct {
 	Keys []vault.Entry `json:"keys"`
 }
 
-type identitiesResponse struct {
-	Identities []registry.Identity `json:"identities"`
+type keyPublicRequest struct {
+	Key string `json:"key"`
 }
 
 type signRecordRequest struct {
@@ -198,6 +200,10 @@ type signRecordRequest struct {
 
 type signRecordResponse struct {
 	Sig string `json:"sig"` // the base64 string Soulstream-Sig carries
+	// PublicKey is the signing persona's public key (base64 raw Ed25519) —
+	// the identity the signature verifies against, returned so a consumer's
+	// Signer needs no second op after signing.
+	PublicKey string `json:"public_key"`
 }
 
 type mintRequest struct {
@@ -268,14 +274,13 @@ func (s *Service) respond(subject string, data []byte) []byte {
 	return marshal(envelope{XKey: s.surfacePub, Data: sealed})
 }
 
-// dispatch applies per-op authorization and runs the op. The (account, user)
-// principal is server-proven (D15); everything here is SoulIdentity policy.
+// dispatch runs the op. The (account, user) principal is server-proven and
+// so is the caller's right to reach the op at all — the permission template
+// gates the op tail (D15, D25). What remains here is the data-dependent
+// policy the ACL cannot express: the vault bindings.
 func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 	switch op {
 	case "keys.list":
-		if err := s.requireAdmin(account, user, op); err != nil {
-			return nil, err
-		}
 		keys, err := s.vault.List()
 		if err != nil {
 			return nil, err
@@ -284,62 +289,38 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		return keysResponse{Keys: keys}, nil
 
 	case "keys.import":
-		if err := s.requireAdmin(account, user, op); err != nil {
-			return nil, err
-		}
 		var req importKeyRequest
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		entry, err := s.vault.Import(req.Name, vault.Kind(req.Kind), req.Secret, req.Account)
+		entry, err := s.vault.Import(req.Name, vault.Kind(req.Kind), req.Secret, req.Account, req.User)
 		if err != nil {
 			return nil, err
 		}
-		s.allow(account, user, op, "key", entry.Name, "kind", entry.Kind, "account", entry.Account)
+		s.allow(account, user, op, "key", entry.Name, "kind", entry.Kind,
+			"account", entry.Account, "bound_user", entry.User)
 		return entry, nil
 
-	case "identities.list":
-		if err := s.requireAdmin(account, user, op); err != nil {
+	case "keys.public":
+		var req keyPublicRequest
+		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		ids, err := s.reg.List()
+		entry, err := s.ownedPersonaKey(account, user, req.Key)
 		if err != nil {
 			return nil, err
 		}
-		s.allow(account, user, op)
-		return identitiesResponse{Identities: ids}, nil
-
-	case "identities.put":
-		if err := s.requireAdmin(account, user, op); err != nil {
-			return nil, err
-		}
-		var id registry.Identity
-		if err := unmarshalStrict(body, &id); err != nil {
-			return nil, err
-		}
-		if err := s.reg.Put(id); err != nil {
-			return nil, err
-		}
-		s.allow(account, user, op, "target_account", id.Account, "target_user", id.User,
-			"personas", id.Personas, "role", id.Role, "admin", id.Admin)
-		return id, nil
+		s.allow(account, user, op, "key", entry.Name)
+		return entry, nil
 
 	case "sign.record":
 		var req signRecordRequest
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		persona, ok := strings.CutPrefix(req.Key, PersonaKeyPrefix)
-		if !ok || persona == "" {
-			return nil, fmt.Errorf("service: record signing uses %s<persona> keys, got %q", PersonaKeyPrefix, req.Key)
-		}
-		allowed, err := s.reg.AllowedPersona(account, user, persona)
+		entry, err := s.ownedPersonaKey(account, user, req.Key)
 		if err != nil {
 			return nil, err
-		}
-		if !allowed {
-			// THE act-as gate (D6), now against a server-proven principal.
-			return nil, fmt.Errorf("service: %s/%s may not act as persona %q", account, user, persona)
 		}
 		canonical, err := base64.StdEncoding.DecodeString(req.Canonical)
 		if err != nil {
@@ -349,21 +330,15 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.allow(account, user, op, "persona", persona)
-		return signRecordResponse{Sig: sig}, nil
+		s.allow(account, user, op, "persona", strings.TrimPrefix(req.Key, PersonaKeyPrefix))
+		return signRecordResponse{Sig: sig, PublicKey: entry.PublicKey}, nil
 
 	case "mint":
 		var req mintRequest
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		if req.Account != account || req.User != user {
-			// Minting for another identity is provisioning: admins only.
-			if err := s.requireAdmin(account, user, op); err != nil {
-				return nil, err
-			}
-		}
-		res, err := mint.Mint(s.vault, s.reg, req.Account, req.User)
+		res, err := mint.Mint(s.vault, req.Account, req.User)
 		if err != nil {
 			return nil, err
 		}
@@ -391,16 +366,23 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 	}
 }
 
-// requireAdmin gates the management ops on a declared admin row (D2).
-func (s *Service) requireAdmin(account, user, op string) error {
-	id, ok, err := s.reg.Get(account, user)
+// ownedPersonaKey resolves key and checks the caller against its owner
+// binding — THE act-as gate (D6 as amended, D25), against the server-proven
+// principal. A key that is not the caller's persona key refuses identically
+// whether it exists or not: the refusal must not probe the vault.
+func (s *Service) ownedPersonaKey(account, user, key string) (vault.Entry, error) {
+	refuse := fmt.Errorf("service: %s/%s has no persona key %q", account, user, key)
+	if !strings.HasPrefix(key, PersonaKeyPrefix) {
+		return vault.Entry{}, fmt.Errorf("service: persona keys are named %s<persona>, got %q", PersonaKeyPrefix, key)
+	}
+	entry, err := s.vault.Get(key)
 	if err != nil {
-		return err
+		return vault.Entry{}, refuse
 	}
-	if !ok || !id.Admin {
-		return fmt.Errorf("service: %s requires an admin identity, and %s/%s is not one", op, account, user)
+	if entry.Kind != vault.KindPersonaSigningKey || entry.Account != account || entry.User != user {
+		return vault.Entry{}, refuse
 	}
-	return nil
+	return entry, nil
 }
 
 // allow and refuse are the audit trail: every op logs its server-proven

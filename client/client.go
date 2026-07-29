@@ -25,14 +25,17 @@ import (
 // ecosystem namespace, empty by default (D14 as amended, journey 0011).
 const Segment = "soulidentity"
 
-// Key is a vault entry as the service shows it: never the secret.
+// Key is a vault entry as the service shows it: never the secret. The
+// binding fields are the authorization source (D25): for an account signing
+// key, Account is the account it signs for — the team's binding (D24); for
+// a persona signing key, (Account, User) is the owner identity that may
+// sign with it; both empty for user keys.
 type Key struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	PublicKey string `json:"public_key"`
-	// Account is the account identity an account signing key signs for —
-	// the team's binding (D24); empty for other kinds.
-	Account string `json:"account,omitempty"`
+	Account   string `json:"account,omitempty"`
+	User      string `json:"user,omitempty"`
 }
 
 // Vault key kinds (the service's vocabulary).
@@ -41,15 +44,6 @@ const (
 	KindNATSUserKey           = "nats-user-key"
 	KindPersonaSigningKey     = "persona-signing-key"
 )
-
-// Identity is one registered identity, keyed by (Account, User).
-type Identity struct {
-	Account  string   `json:"account"`
-	User     string   `json:"user"`
-	Personas []string `json:"personas,omitempty"`
-	Role     string   `json:"role,omitempty"`
-	Admin    bool     `json:"admin,omitempty"`
-}
 
 // MintResult is a minted user JWT; Creds is present only when the custody
 // escape was explicitly requested.
@@ -218,19 +212,20 @@ func (c *Client) Status() (string, error) {
 }
 
 // ImportKey stores a secret in the vault (write-only; the response carries
-// the public key). Existing names are refused. account is the account
-// identity an account signing key signs for — required for that kind (the
-// key name is the team name, D24), empty for other kinds. Admin identities
-// only.
-func (c *Client) ImportKey(name, kind, secret, account string) (Key, error) {
+// the public key). Existing names are refused. account and user are the
+// binding (D25): an account signing key requires account — the identity it
+// signs for (the key name is the team name, D24); a persona signing key
+// requires both — its owner; other kinds refuse either. An operator op —
+// the deployment's permission template gates who reaches it.
+func (c *Client) ImportKey(name, kind, secret, account, user string) (Key, error) {
 	var out Key
 	err := c.call("keys.import", map[string]string{
-		"name": name, "kind": kind, "secret": secret, "account": account,
+		"name": name, "kind": kind, "secret": secret, "account": account, "user": user,
 	}, &out)
 	return out, err
 }
 
-// Keys lists the vault (public form). Admin identities only.
+// Keys lists the vault (public form). An operator op.
 func (c *Client) Keys() ([]Key, error) {
 	var out struct {
 		Keys []Key `json:"keys"`
@@ -239,32 +234,20 @@ func (c *Client) Keys() ([]Key, error) {
 	return out.Keys, err
 }
 
-// PutIdentity declares an identity (create-or-replace). Admin identities only.
-func (c *Client) PutIdentity(id Identity) error {
-	return c.call("identities.put", id, nil)
-}
-
-// Identities lists the registry. Admin identities only.
-func (c *Client) Identities() ([]Identity, error) {
-	var out struct {
-		Identities []Identity `json:"identities"`
-	}
-	err := c.call("identities.list", struct{}{}, &out)
-	return out.Identities, err
-}
-
-// PersonaKeyName is the vault name of a persona's signing key — the binding
-// act-as is enforced against (hq/02-DESIGN/nats-surface.md).
+// PersonaKeyName is the vault name of a persona's signing key; the key's
+// owner binding is what sign.record and keys.public are enforced against
+// (D6 as amended, D25).
 func PersonaKeyName(persona string) string {
 	return "persona/" + persona
 }
 
 // SignRecord signs canonical record bytes as persona, returning the base64
-// signature string Soulstream-Sig carries. The service enforces that this
-// client's identity may act as the persona (D6).
+// signature string Soulstream-Sig carries. The service enforces the persona
+// key's owner binding against this client's identity (D6 as amended).
 func (c *Client) SignRecord(persona string, canonical []byte) (string, error) {
 	var out struct {
-		Sig string `json:"sig"`
+		Sig       string `json:"sig"`
+		PublicKey string `json:"public_key"`
 	}
 	err := c.call("sign.record", map[string]string{
 		"key": PersonaKeyName(persona), "canonical": base64.StdEncoding.EncodeToString(canonical),
@@ -272,8 +255,63 @@ func (c *Client) SignRecord(persona string, canonical []byte) (string, error) {
 	return out.Sig, err
 }
 
-// Mint issues a user JWT for the registered identity. Minting for an identity
-// other than the client's own requires admin.
+// PersonaPublicKey returns the public key (base64 raw Ed25519, the encoding
+// soulstream profiles and pins use) of a persona key owned by this client's
+// identity — the owner binding is enforced service-side.
+func (c *Client) PersonaPublicKey(persona string) (string, error) {
+	var out Key
+	err := c.call("keys.public", map[string]string{"key": PersonaKeyName(persona)}, &out)
+	return out.PublicKey, err
+}
+
+// PersonaSigner is the persona bound to a signing capability: the shape of
+// soulstream's identity.Signer seam (PublicKey() string; Sign(canonical
+// []byte) (string, error)), satisfied structurally — this package imports
+// nothing of soulstream and soulstream nothing of it; a consumer wires the
+// two (the cycle guard, ROADMAP M2). Safe for concurrent use: every Sign is
+// an independent sealed round-trip; deadlines are the Client's per-request
+// timeout, owned here as the seam requires.
+type PersonaSigner struct {
+	c       *Client
+	persona string
+	pub     string
+}
+
+// PersonaSigner binds persona to its signer, resolving the public key once
+// through keys.public — construction fails when the persona key is not the
+// client identity's own (D6 as amended, D25), so a mis-wired signer fails
+// fast, not at first publish.
+func (c *Client) PersonaSigner(persona string) (*PersonaSigner, error) {
+	pub, err := c.PersonaPublicKey(persona)
+	if err != nil {
+		return nil, err
+	}
+	if pub == "" {
+		return nil, errors.New("soulidentity: keys.public returned no public key")
+	}
+	return &PersonaSigner{c: c, persona: persona, pub: pub}, nil
+}
+
+// PublicKey returns the persona's public key — the identity this signer
+// signs as.
+func (s *PersonaSigner) PublicKey() string { return s.pub }
+
+// Sign signs canonical bytes as the persona. It never returns ("", nil):
+// an empty signature is a signing failure (the seam's contract — the
+// canonical form spells "unsigned" as an omitted sig).
+func (s *PersonaSigner) Sign(canonical []byte) (string, error) {
+	sig, err := s.c.SignRecord(s.persona, canonical)
+	if err != nil {
+		return "", err
+	}
+	if sig == "" {
+		return "", errors.New("soulidentity: service returned an empty signature")
+	}
+	return sig, nil
+}
+
+// Mint issues a durable user JWT for (account, user) — an operator op:
+// issuing durable credentials is provisioning (D25).
 func (c *Client) Mint(account, user string) (MintResult, error) {
 	var out MintResult
 	err := c.call("mint", map[string]any{
@@ -326,7 +364,7 @@ type SentinelResult struct {
 }
 
 // CreateToken issues an API token for the registered identity; ttl of zero
-// means no expiry. Admin identities only.
+// means no expiry. An operator op (D25).
 func (c *Client) CreateToken(account, user, label string, ttl time.Duration) (TokenResult, error) {
 	var out TokenResult
 	err := c.call("tokens.create", map[string]any{
@@ -337,7 +375,7 @@ func (c *Client) CreateToken(account, user, label string, ttl time.Duration) (To
 }
 
 // Tokens lists the stored API tokens (digests and identities, never
-// plaintext). Admin identities only.
+// plaintext). An operator op (D25).
 func (c *Client) Tokens() ([]TokenEntry, error) {
 	var out struct {
 		Tokens []TokenEntry `json:"tokens"`
@@ -347,14 +385,14 @@ func (c *Client) Tokens() ([]TokenEntry, error) {
 }
 
 // RevokeToken deletes a token by its digest handle: the next connection
-// attempt is refused; open connections end at their JWT's expiry. Admin
-// identities only.
+// attempt is refused; open connections end at their JWT's expiry. An
+// operator op (D25).
 func (c *Client) RevokeToken(digest string) error {
 	return c.call("tokens.revoke", map[string]string{"digest": digest}, nil)
 }
 
-// MintSentinel mints the deployment's sentinel credential. Admin identities
-// only.
+// MintSentinel mints the deployment's sentinel credential. An operator op
+// (D25).
 func (c *Client) MintSentinel() (SentinelResult, error) {
 	var out SentinelResult
 	err := c.call("sentinel.mint", struct{}{}, &out)

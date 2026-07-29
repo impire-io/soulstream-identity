@@ -117,6 +117,13 @@ one declared pipeline:
    registry row was **superseded before it was built** — the maintainer
    rejected the rule table; the built shape is D24's role == team, with
    the two lanes disjoint for membership (no fallback, no cross-lookup).
+   *(Amended again 2026-07-29, journey 0013 — D25:)* with the registry
+   dissolved, authorize returns only **(account, user)** — the token
+   record already names both, and the signing key is resolved by the
+   target account's D24 binding (none refuses; two refuse as ambiguous).
+   Admin and personas were never the lane's to confer and now exist
+   nowhere to confer: op grants are the transport ACL's, persona
+   ownership is the key binding's (D25).
 3. **mint** — the existing D20 path, unchanged (shared by both lanes).
 
 The credential store and the policy store are different stores with
@@ -129,11 +136,12 @@ therefore a deliberate M4 configuration knob (`--callout-ttl`, default
 15m) whose price is one callout round-trip per TTL per open connection
 [measured].
 
-*As built (M4, journey 0010):* tokens are managed over the sealed surface
-— `tokens.create` (which refuses identities the registry does not declare:
-a token that could only ever be refused is a mistake caught at issuance),
-`tokens.list`, `tokens.revoke` — all admin-gated (D18); the plaintext
-appears exactly once, in the create response.
+*As built (M4, journey 0010; amended with D25):* tokens are managed over
+the sealed surface — `tokens.create` (which refuses an account with no
+bound team key: a token that could only ever be refused is a mistake
+caught at issuance), `tokens.list`, `tokens.revoke` — all operator ops,
+gated by the transport ACL (D25, superseding the D18 admin flag); the
+plaintext appears exactly once, in the create response.
 
 **Reversal condition** (inherited from D12's watch): any policy field —
 permission, persona, role — proposed for the token record schema, or a
@@ -185,10 +193,11 @@ declares: an account signing key — whose record now carries its **account
 binding** (the account identity it signs for), required at import
 (`keys.import`, `client.ImportKey`, and the key CLI gained the field
 together). There is no catalog, no rule table, no precedence, and no
-per-user entry anywhere; the registry row's `Role` names the same team
-object for the token lane, so both lanes converge on one declared team
-set and differ only in who names the team — the registry row or the
-validated claim.
+per-user entry anywhere; *(amended 2026-07-29, journey 0013 — D25:)* the
+token lane resolves the same team object **by the token record's account**
+against the key's binding, so both lanes converge on one declared team set
+and differ only in who names the team — the token record's account or the
+validated claim's role value.
 
 The authorize rule: **exactly one role value must name a declared team.**
 Zero matches refuse; more than one refuses as ambiguous, because claim

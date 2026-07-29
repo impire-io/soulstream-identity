@@ -17,8 +17,8 @@ non-negotiables.
 2. `hq/04-JOURNEY/README.md` — where things stand + the episode index.
 3. `hq/03-IMPLEMENTATION/ROADMAP.md` — the milestones and their gates.
 4. `hq/02-DESIGN/` — the design docs and their numbered decisions (D1–D13 in
-   `agent.md`, D14–D18 in `nats-surface.md`, D19–D24 in `auth-callout.md`);
-   code comments cite these D-numbers.
+   `agent.md`, D14–D18 and D25 in `nats-surface.md`, D19–D24 in
+   `auth-callout.md`); code comments cite these D-numbers.
 
 ## Non-negotiables (constitution articles, in brief)
 
@@ -31,12 +31,14 @@ non-negotiables.
   explicit and loudly logged. In-process key material stays inside
   `internal/vault`.
 - **The server is the verifier of record** (II): transport permissions live
-  NATS-side (scoped signing keys, callout JWTs); SoulIdentity's own policy is
-  only who exists and who may act as which persona. Binding checks the server
-  will repeat are diagnostics, never gates.
+  NATS-side (scoped signing keys, callout JWTs), and since D25 that includes
+  which ops a principal reaches (the op tail of the subject); SoulIdentity's
+  own policy is only the vault bindings — which account a team key signs
+  for, which identity owns a persona key. Binding checks the server will
+  repeat are diagnostics, never gates.
 - **Smallest viable implementation** (III): growth is new modes and backends
-  on the same vault + registry, never new machinery; scope creep is a review
-  blocker.
+  on the same vault + token store, never new machinery; scope creep is a
+  review blocker.
 - **Documentation is first-class** (IV): plain words, decisions numbered with
   reasoning, docs in the same change as behavior.
 - **The working agreement** (anti-drift): load-bearing claims carry an

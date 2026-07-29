@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,13 +11,14 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// harness: a service over a MemStore vault and a registry with an admin, a
-// persona-bearing user, and a persona-less user — all in one account.
-func harness(t *testing.T) (*Service, string) {
+// harness: a service over a MemStore vault. There is no admin fixture and no
+// registry: which principals reach which ops is the server's permission
+// enforcement (D25), outside respond()'s world — these tests drive the ops
+// directly and prove the data-dependent policy, the bindings.
+func harness(t *testing.T) (*Service, *vault.Vault, string) {
 	t.Helper()
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
@@ -26,28 +26,15 @@ func harness(t *testing.T) (*Service, string) {
 	if err != nil {
 		t.Fatalf("vault: %v", err)
 	}
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.json"))
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	accKP, _ := nkeys.CreateAccount()
 	accPub, _ := accKP.PublicKey()
-	for _, id := range []registry.Identity{
-		{Account: accPub, User: "ops", Admin: true},
-		{Account: accPub, User: "daan", Personas: []string{"daan"}, Role: "acme/role"},
-		{Account: accPub, User: "mallory"},
-	} {
-		if err := reg.Put(id); err != nil {
-			t.Fatalf("register %s: %v", id.User, err)
-		}
-	}
 	surfaceKP, _ := nkeys.CreateCurveKeys()
 	surfaceSeed, _ := surfaceKP.Seed()
-	s, err := New(v, reg, string(surfaceSeed), nil)
+	s, err := New(v, string(surfaceSeed), nil)
 	if err != nil {
 		t.Fatalf("service: %v", err)
 	}
-	return s, accPub
+	return s, v, accPub
 }
 
 // call drives one sealed round-trip through respond, exactly as a client
@@ -101,7 +88,7 @@ type wireError struct{ msg string }
 func (e *wireError) Error() string { return e.msg }
 
 func TestOpenOpsArePlaintext(t *testing.T) {
-	s, _ := harness(t)
+	s, _, _ := harness(t)
 	var st statusResponse
 	if err := json.Unmarshal(s.respond(Segment+".status", nil), &st); err != nil {
 		t.Fatalf("status: %v", err)
@@ -115,50 +102,40 @@ func TestOpenOpsArePlaintext(t *testing.T) {
 	}
 }
 
-func TestAdminGateOnManagementOps(t *testing.T) {
-	s, acc := harness(t)
+func TestKeyManagementRoundTrip(t *testing.T) {
+	s, _, acc := harness(t)
 	ukp, _ := nkeys.CreateUser()
 	seed, _ := ukp.Seed()
-	req := importKeyRequest{Name: "imported", Kind: string(vault.KindNATSUserKey), Secret: string(seed)}
 
 	var entry vault.Entry
-	if err := call(t, s, acc, "ops", "keys.import", req, &entry); err != nil {
-		t.Fatalf("admin import: %v", err)
-	}
-	if err := call(t, s, acc, "daan", "keys.import", req, nil); err == nil ||
-		!strings.Contains(err.Error(), "admin") {
-		t.Fatalf("non-admin import must refuse naming admin, got %v", err)
-	}
-	if err := call(t, s, acc, "ghost", "keys.list", struct{}{}, nil); err == nil {
-		t.Fatal("unregistered principal listed keys")
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "imported", Kind: string(vault.KindNATSUserKey), Secret: string(seed),
+	}, &entry); err != nil {
+		t.Fatalf("import: %v", err)
 	}
 	var keys keysResponse
 	if err := call(t, s, acc, "ops", "keys.list", struct{}{}, &keys); err != nil {
-		t.Fatalf("admin list: %v", err)
+		t.Fatalf("list: %v", err)
 	}
 	if len(keys.Keys) != 1 || keys.Keys[0].Name != "imported" {
 		t.Fatalf("list: %+v", keys.Keys)
 	}
-
-	var ids identitiesResponse
-	if err := call(t, s, acc, "ops", "identities.list", struct{}{}, &ids); err != nil {
-		t.Fatalf("admin identities.list: %v", err)
-	}
-	if len(ids.Identities) != 3 {
-		t.Fatalf("identities: %+v", ids.Identities)
-	}
-	if err := call(t, s, acc, "daan", "identities.put",
-		registry.Identity{Account: acc, User: "evil", Admin: true}, nil); err == nil {
-		t.Fatal("non-admin declared an identity")
+	// The import surface enforces the binding rules end to end.
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "persona/unbound", Kind: string(vault.KindPersonaSigningKey),
+		Secret: base64.StdEncoding.EncodeToString(make([]byte, ed25519.SeedSize)),
+	}, nil); err == nil {
+		t.Fatal("a persona key without its owner binding must refuse")
 	}
 }
 
-func TestActAsIsEnforced(t *testing.T) {
-	s, acc := harness(t)
+func TestOwnerBindingGatesSigning(t *testing.T) {
+	s, _, acc := harness(t)
 	_, priv, _ := ed25519.GenerateKey(nil)
 	personaSeed := base64.StdEncoding.EncodeToString(priv.Seed())
 	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
-		Name: "persona/daan", Kind: string(vault.KindPersonaSigningKey), Secret: personaSeed,
+		Name: "persona/daan", Kind: string(vault.KindPersonaSigningKey),
+		Secret: personaSeed, Account: acc, User: "daan",
 	}, nil); err != nil {
 		t.Fatalf("import persona key: %v", err)
 	}
@@ -167,61 +144,90 @@ func TestActAsIsEnforced(t *testing.T) {
 	var sig signRecordResponse
 	if err := call(t, s, acc, "daan", "sign.record",
 		signRecordRequest{Key: "persona/daan", Canonical: canonical}, &sig); err != nil {
-		t.Fatalf("allowed act-as refused: %v", err)
+		t.Fatalf("owner signing refused: %v", err)
 	}
 	if sig.Sig == "" {
 		t.Fatal("empty signature")
 	}
+	if sig.PublicKey == "" {
+		t.Fatal("sign.record did not return the persona public key")
+	}
 
-	// The gate: mallory is registered but not allowed the persona.
+	// THE gate (D6 as amended): mallory does not own the key.
 	if err := call(t, s, acc, "mallory", "sign.record",
 		signRecordRequest{Key: "persona/daan", Canonical: canonical}, nil); err == nil ||
-		!strings.Contains(err.Error(), "may not act as") {
-		t.Fatalf("disallowed act-as must refuse, got %v", err)
+		!strings.Contains(err.Error(), "no persona key") {
+		t.Fatalf("non-owner signing must refuse, got %v", err)
+	}
+	// A missing key refuses with the same wording — the refusal is not a
+	// vault probe.
+	missErr := call(t, s, acc, "mallory", "sign.record",
+		signRecordRequest{Key: "persona/ghost", Canonical: canonical}, nil)
+	if missErr == nil || !strings.Contains(missErr.Error(), "no persona key") {
+		t.Fatalf("missing key must refuse identically, got %v", missErr)
 	}
 	// Keys outside the persona/ convention cannot sign records at all.
 	if err := call(t, s, acc, "daan", "sign.record",
 		signRecordRequest{Key: "imported", Canonical: canonical}, nil); err == nil {
 		t.Fatal("non-persona key name accepted for record signing")
 	}
+
+	// keys.public: the owner reads the public key; a non-owner is refused.
+	var pub vault.Entry
+	if err := call(t, s, acc, "daan", "keys.public",
+		keyPublicRequest{Key: "persona/daan"}, &pub); err != nil {
+		t.Fatalf("owner keys.public refused: %v", err)
+	}
+	if pub.PublicKey != sig.PublicKey {
+		t.Fatalf("keys.public %q != sign.record public key %q", pub.PublicKey, sig.PublicKey)
+	}
+	if err := call(t, s, acc, "mallory", "keys.public",
+		keyPublicRequest{Key: "persona/daan"}, nil); err == nil {
+		t.Fatal("non-owner read a persona public key")
+	}
 }
 
-func TestMintSelfOrAdmin(t *testing.T) {
-	s, acc := harness(t)
+func TestMintResolvesByBinding(t *testing.T) {
+	s, _, acc := harness(t)
 	askKP, _ := nkeys.CreateAccount()
 	askSeed, _ := askKP.Seed()
 	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
-		Name: "acme/role", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed), Account: acc,
+		Name: "acme", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed), Account: acc,
 	}, nil); err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}
 
 	var res mintResponse
-	if err := call(t, s, acc, "daan", "mint",
+	if err := call(t, s, acc, "ops", "mint",
 		mintRequest{Account: acc, User: "daan"}, &res); err != nil {
-		t.Fatalf("self-mint: %v", err)
+		t.Fatalf("mint: %v", err)
 	}
 	if _, err := jwt.DecodeUserClaims(res.JWT); err != nil {
 		t.Fatalf("minted JWT does not decode: %v", err)
 	}
 
-	if err := call(t, s, acc, "mallory", "mint",
-		mintRequest{Account: acc, User: "daan"}, nil); err == nil {
-		t.Fatal("non-admin minted for another identity")
-	}
-	var forOther mintResponse
+	// An account with no bound team refuses — the binding is the only
+	// authorize source (D25).
+	strayKP, _ := nkeys.CreateAccount()
+	strayPub, _ := strayKP.PublicKey()
 	if err := call(t, s, acc, "ops", "mint",
-		mintRequest{Account: acc, User: "daan", ExportCreds: true}, &forOther); err != nil {
-		t.Fatalf("admin mint for other: %v", err)
+		mintRequest{Account: strayPub, User: "daan"}, nil); err == nil {
+		t.Fatal("minted for an account with no bound team")
 	}
-	if !strings.Contains(forOther.Creds, "-----BEGIN USER NKEY SEED-----") {
+
+	var withCreds mintResponse
+	if err := call(t, s, acc, "ops", "mint",
+		mintRequest{Account: acc, User: "daan", ExportCreds: true}, &withCreds); err != nil {
+		t.Fatalf("mint with creds escape: %v", err)
+	}
+	if !strings.Contains(withCreds.Creds, "-----BEGIN USER NKEY SEED-----") {
 		t.Fatal("creds escape did not render a creds file")
 	}
 }
 
 func TestTokenAndSentinelOps(t *testing.T) {
-	s, acc := harness(t)
-	// Without callout configuration the ops refuse, even for admins.
+	s, _, acc := harness(t)
+	// Without callout configuration the ops refuse.
 	if err := call(t, s, acc, "ops", "tokens.list", struct{}{}, nil); err == nil ||
 		!strings.Contains(err.Error(), "callout") {
 		t.Fatalf("token op without callout config: %v", err)
@@ -239,16 +245,24 @@ func TestTokenAndSentinelOps(t *testing.T) {
 	store := callout.NewMemTokenStore()
 	WithCallout(store, "auth/issuer", authAccPub)(s)
 
-	// Admin-gated like the rest of management.
-	if err := call(t, s, acc, "daan", "tokens.list", struct{}{}, nil); err == nil ||
-		!strings.Contains(err.Error(), "admin") {
-		t.Fatalf("non-admin token op: %v", err)
-	}
-
-	// Issuance refuses unregistered identities, then works for daan.
+	// Issuance refuses an account no team is bound to (fail at issuance,
+	// not at callout), then works once the team is declared.
+	strayKP, _ := nkeys.CreateAccount()
+	strayPub, _ := strayKP.PublicKey()
 	if err := call(t, s, acc, "ops", "tokens.create",
-		tokenCreateRequest{Account: acc, User: "ghost"}, nil); err == nil {
-		t.Fatal("token created for an unregistered identity")
+		tokenCreateRequest{Account: strayPub, User: "daan"}, nil); err == nil {
+		t.Fatal("token created for an account with no bound team")
+	}
+	askKP, _ := nkeys.CreateAccount()
+	askSeed, _ := askKP.Seed()
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "acme", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed), Account: acc,
+	}, nil); err != nil {
+		t.Fatalf("import team key: %v", err)
+	}
+	if err := call(t, s, acc, "ops", "tokens.create",
+		tokenCreateRequest{Account: acc, User: ""}, nil); err == nil {
+		t.Fatal("token created without a user")
 	}
 	var created tokenCreateResponse
 	if err := call(t, s, acc, "ops", "tokens.create",
@@ -308,7 +322,7 @@ func TestTokenAndSentinelOps(t *testing.T) {
 }
 
 func TestPrefixedSubjectSpace(t *testing.T) {
-	s, acc := harness(t)
+	s, v, acc := harness(t)
 	WithPrefix("prod.soulstream")(s)
 	if s.Root() != "prod.soulstream."+Segment {
 		t.Fatalf("root: %q", s.Root())
@@ -326,6 +340,11 @@ func TestPrefixedSubjectSpace(t *testing.T) {
 
 	// A sealed principal op works under the prefixed root: drive respond the
 	// way call() does, but against the prefixed subject.
+	ukp, _ := nkeys.CreateUser()
+	seed, _ := ukp.Seed()
+	if _, err := v.Import("imported", vault.KindNATSUserKey, string(seed), "", ""); err != nil {
+		t.Fatalf("import: %v", err)
+	}
 	var x xkeyResponse
 	if err := json.Unmarshal(s.respond(s.Root()+".xkey", nil), &x); err != nil {
 		t.Fatalf("xkey: %v", err)
@@ -338,7 +357,7 @@ func TestPrefixedSubjectSpace(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 	req := marshal(envelope{XKey: ephPub, Data: sealedBody})
-	reply := s.respond(s.Root()+"."+acc+".ops.identities.list", req)
+	reply := s.respond(s.Root()+"."+acc+".ops.keys.list", req)
 	var env envelope
 	if err := json.Unmarshal(reply, &env); err != nil || len(env.Data) == 0 {
 		t.Fatalf("prefixed principal op did not answer an envelope: %s", reply)
@@ -347,8 +366,8 @@ func TestPrefixedSubjectSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	var ids identitiesResponse
-	if err := json.Unmarshal(opened, &ids); err != nil || len(ids.Identities) == 0 {
+	var keys keysResponse
+	if err := json.Unmarshal(opened, &keys); err != nil || len(keys.Keys) == 0 {
 		t.Fatalf("prefixed op result: %s", opened)
 	}
 }
@@ -367,7 +386,7 @@ func TestValidatePrefix(t *testing.T) {
 }
 
 func TestMalformedRequestsRefusePlaintext(t *testing.T) {
-	s, acc := harness(t)
+	s, _, acc := harness(t)
 	reply := s.respond(strings.Join([]string{Segment, acc, "daan", "mint"}, "."), []byte("not-json"))
 	var er errorResponse
 	if err := json.Unmarshal(reply, &er); err != nil || er.Error == "" {

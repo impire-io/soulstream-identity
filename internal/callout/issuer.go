@@ -1,9 +1,9 @@
 // The issuer: the mint with a callout trigger (hq/02-DESIGN/auth-callout.md
-// D20). It validates the presented token (D22 stage 1), authorizes via the
-// registry (stage 2, inside mint.MintForKey), and answers the server with a
-// scoped ephemeral user JWT for the server-assigned key. No response or an
-// error response means no admission — fail-closed is the protocol's own
-// property; nothing here may add an admit-on-timeout convenience.
+// D20). It validates the presented token (D22 stage 1), authorizes against
+// the vault's team bindings (stage 2 — D24, D25), and answers the server
+// with a scoped ephemeral user JWT for the server-assigned key. No response
+// or an error response means no admission — fail-closed is the protocol's
+// own property; nothing here may add an admit-on-timeout convenience.
 
 package callout
 
@@ -20,7 +20,6 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulidentity/internal/mint"
-	"github.com/impire-io/soulidentity/internal/registry"
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
@@ -35,10 +34,9 @@ const xkeyHeader = "Nats-Server-Xkey"
 // deployment is ciphertext.
 const jwtPrefix = "eyJ"
 
-// Issuer answers auth-callout requests from the vault and registry.
+// Issuer answers auth-callout requests from the vault.
 type Issuer struct {
 	vault       *vault.Vault
-	reg         *registry.Registry
 	api         *APITokenValidator // the sit_ lane (D22)
 	oidc        *OIDCValidator     // the eyJ lane (D23); nil = lane disabled
 	authKeyName string             // vault name of the AUTH account signing key (D21)
@@ -59,7 +57,7 @@ func WithOIDC(v *OIDCValidator) IssuerOption {
 // NewIssuer builds the issuer. calloutXKeySeed may be empty for deployments
 // whose AUTH account declares no authorization xkey; ttl bounds every issued
 // credential and is the revocation propagation bound (D22).
-func NewIssuer(v *vault.Vault, reg *registry.Registry, tokens Store, authKeyName string, ttl time.Duration, calloutXKeySeed string, log *slog.Logger, opts ...IssuerOption) (*Issuer, error) {
+func NewIssuer(v *vault.Vault, tokens Store, authKeyName string, ttl time.Duration, calloutXKeySeed string, log *slog.Logger, opts ...IssuerOption) (*Issuer, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -69,7 +67,7 @@ func NewIssuer(v *vault.Vault, reg *registry.Registry, tokens Store, authKeyName
 	if ttl <= 0 {
 		return nil, errors.New("callout: a positive ttl is required")
 	}
-	i := &Issuer{vault: v, reg: reg, api: NewAPITokenValidator(tokens), authKeyName: authKeyName, ttl: ttl, log: log}
+	i := &Issuer{vault: v, api: NewAPITokenValidator(tokens), authKeyName: authKeyName, ttl: ttl, log: log}
 	if seed := strings.TrimSpace(calloutXKeySeed); seed != "" {
 		kp, err := nkeys.FromCurveSeed([]byte(seed))
 		if err != nil {
@@ -170,7 +168,8 @@ func (i *Issuer) decide(req *jwt.AuthorizationRequestClaims) (string, error) {
 }
 
 // decideToken is the sit_ lane: digest validation, then authorize-and-mint
-// via the registry row's role key (D22's registry-declared source).
+// via the team bound to the token record's account (D22 as amended, D25) —
+// the same declared team set the OIDC lane resolves by name (D24).
 func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (string, error) {
 	sub, err := i.api.Validate(cred)
 	if err != nil {
@@ -178,7 +177,7 @@ func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (
 			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
 		return "", errors.New("credential rejected")
 	}
-	userJWT, err := mint.ForKey(i.vault, i.reg, sub.Account, sub.User, req.UserNkey, i.ttl)
+	userJWT, err := mint.ForKey(i.vault, sub.Account, sub.User, req.UserNkey, i.ttl)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "err", err.Error(),
 			"account", sub.Account, "user", sub.User, "label", sub.Label,
