@@ -17,6 +17,20 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-29)
 
+**M2's first gate criterion is measured — the seam carries a real record**
+([episode 0014](0014-the-cross-service-proof.md)): a Soulstream record
+signed through the running SoulIdentity service verifies in a real realm.
+The proof lives in `e2e/` — a consumer-position module importing both
+repos (the cycle guard's shape), riding `make test`. One minted scoped
+credential carries both subject spaces and one connection serves both
+clients; `client.PersonaSigner` slots into `realm.Config.Signer`
+unmodified; the reader's keyring is built from the persona directory, and
+announce, baseline, and turn read `SigVerified` — `unknown-key` without
+the keyring, the negative control [measured]. What remains of M2 is the
+**node half** (one pooled connection per user, no node-held creds), which
+lives in soulstream's remote MCP node feature; the profile-publication
+duty on connect belongs there too.
+
 **The identity registry is dissolved — authorization lives in the ACLs
 and the bindings** ([episode 0013](0013-the-registry-dissolves.md); D25 in
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md), amending
@@ -165,3 +179,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0011 | [The shared subject prefix: one namespace for the ecosystem](0011-the-shared-subject-prefix.md) |
 | 0012 | [The Entra lane: role == team, no mapping store](0012-entra-role-claim-lane.md) |
 | 0013 | [The registry dissolves: authorization in the ACLs and the bindings](0013-the-registry-dissolves.md) |
+| 0014 | [The cross-service proof: the seam carries a real record](0014-the-cross-service-proof.md) |

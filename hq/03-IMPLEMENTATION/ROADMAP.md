@@ -6,6 +6,17 @@ gate.*
 
 ## Where we are (2026-07-29)
 
+**M2's signer half is measured — the cross-service proof rides the gate**
+([journey 0014](../04-JOURNEY/0014-the-cross-service-proof.md)): a
+Soulstream record signed through the running service verifies in a real
+realm, proven from the consumer position (`e2e/`, a separate module
+importing both repos — the cycle guard's shape — soulstream pinned at
+v0.6.0), in `make test`. One scoped credential carries both subject
+spaces on one connection; the reader's keyring comes from the persona
+directory. Remaining for M2: the node half of the gate (one pooled
+connection per user, no node-held creds) — soulstream's remote MCP node
+feature, which also owns the profile-publication duty at connect.
+
 **The registry dissolved — D25, same day**
 ([journey 0013](../04-JOURNEY/0013-the-registry-dissolves.md), D25 in
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md) amending
@@ -99,12 +110,14 @@ arrive over the NATS surface).
    in Go but a versioning trap we simply never enter. What the seam proved
    missing landed 2026-07-29 with D25 (journey 0013): `client.PersonaSigner`
    — the seam's exact shape, fail-fast construction over the owner-gated
-   `keys.public`, never ("", nil) — exercised in the M3 rig. Gate: a
-   Soulstream record signed through the service verifies in the realm
-   [measured] (the proof rig must sit in a consumer position — the cycle
-   guard forbids importing soulstream here; likely a nested test module);
-   the node holds one pooled connection per user with no node-held creds.
-   This milestone lives mostly in the consuming repos; here it may add only
+   `keys.public`, never ("", nil) — exercised in the M3 rig. Gate, half
+   met: ✅ a Soulstream record signed through the service verifies in the
+   realm **[measured 2026-07-29]** (journey
+   [0014](../04-JOURNEY/0014-the-cross-service-proof.md); the proof sits
+   in consumer position — the nested `e2e/` module imports both repos and
+   rides `make test`); ⬜ the node holds one pooled connection per user
+   with no node-held creds — soulstream's remote MCP node feature. This
+   milestone lives mostly in the consuming repos; here it may add only
    what those consumers prove missing.
 3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
    [journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md)). The

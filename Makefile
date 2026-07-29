@@ -9,20 +9,25 @@ LDFLAGS := -X github.com/impire-io/soulidentity/internal/version.Version=$(VERSI
 fmt:
 	gofmt -w .
 
-# Keep go.mod/go.sum honest.
+# Keep go.mod/go.sum honest — the consumer-position e2e module too.
 tidy:
 	go mod tidy
+	cd e2e && go mod tidy
 
 build:
 	go build ./...
 	go build -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
 
-# All tests, no skips.
+# All tests, no skips — including the M2 cross-service proof in e2e/, a
+# separate module in consumer position (it imports soulstream; this module
+# never does — the cycle guard).
 test:
 	go test ./...
+	cd e2e && go test ./...
 
 lint:
 	golangci-lint run
+	cd e2e && golangci-lint run
 
 # The one gate to run before every commit: everything green.
 check: fmt tidy build test lint
