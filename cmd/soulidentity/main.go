@@ -196,6 +196,15 @@ func seedFromFlagOrEnv(flagVal, envName string) (string, error) {
 	return "", fmt.Errorf("no seed: set %s (or --%s)", envName, strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(envName, "SOULIDENTITY_"), "_", "-")))
 }
 
+// stringFromFlagOrEnv resolves optional configuration: flag first, then the
+// environment; empty means unset.
+func stringFromFlagOrEnv(flagVal, envName string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return os.Getenv(envName)
+}
+
 func cmdServe(args []string, errw io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	cf := addConnFlags(fs)
@@ -210,6 +219,8 @@ func cmdServe(args []string, errw io.Writer) error {
 	tokenBucket := fs.String("token-bucket", "SOULIDENTITY_TOKENS", "KV bucket holding API token digests")
 	calloutTTL := fs.Duration("callout-ttl", 15*time.Minute, "issued-JWT lifetime — the revocation propagation bound (D22)")
 	calloutKey := fs.String("callout-key", "", "callout xkey seed (SX…); prefer SOULIDENTITY_CALLOUT_KEY")
+	oidcIssuer := fs.String("oidc-issuer", "", "OIDC issuer URL for the external-JWT lane (D23); or SOULIDENTITY_OIDC_ISSUER")
+	oidcAudience := fs.String("oidc-audience", "", "OIDC audience (the app registration's client ID); or SOULIDENTITY_OIDC_AUDIENCE")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -279,7 +290,24 @@ func cmdServe(args []string, errw io.Writer) error {
 			return fmt.Errorf("callout connection: %w", err)
 		}
 		defer ncCallout.Close()
-		issuer, err := callout.NewIssuer(v, reg, store, *authKey, *calloutTTL, calloutSeed, log)
+
+		// The OIDC lane (D23): both issuer and audience present enables it;
+		// discovery runs now and fails closed. Either absent, eyJ credentials
+		// refuse early in the issuer.
+		issuerURL := stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER")
+		audience := stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE")
+		var issOpts []callout.IssuerOption
+		if issuerURL != "" || audience != "" {
+			if issuerURL == "" || audience == "" {
+				return errors.New("the oidc lane needs both --oidc-issuer and --oidc-audience")
+			}
+			oidcVal, err := callout.NewOIDCValidator(ctx, issuerURL, audience)
+			if err != nil {
+				return err
+			}
+			issOpts = append(issOpts, callout.WithOIDC(oidcVal))
+		}
+		issuer, err := callout.NewIssuer(v, reg, store, *authKey, *calloutTTL, calloutSeed, log, issOpts...)
 		if err != nil {
 			return err
 		}
@@ -288,7 +316,7 @@ func cmdServe(args []string, errw io.Writer) error {
 		}
 		log.Info("callout issuer serving", "subject", callout.Subject,
 			"token_bucket", *tokenBucket, "ttl", calloutTTL.String(),
-			"sealed_requests", calloutSeed != "")
+			"sealed_requests", calloutSeed != "", "oidc", issuerURL != "")
 	}
 
 	if err := service.ValidatePrefix(*cf.prefix); err != nil {
@@ -460,6 +488,7 @@ func cmdKey(args []string, out io.Writer) error {
 		as := asFlag(fs)
 		name := fs.String("name", "", "vault name for the key")
 		kind := fs.String("kind", "", "key kind")
+		account := fs.String("account", "", "account public key (A…) an account signing key signs for — the team's binding (D24)")
 		seedFile := fs.String("seed-file", "", "file holding the seed")
 		seedStdin := fs.Bool("seed-stdin", false, "read the seed from stdin")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -487,7 +516,7 @@ func cmdKey(args []string, out io.Writer) error {
 			return err
 		}
 		defer done()
-		entry, err := c.ImportKey(*name, *kind, secret)
+		entry, err := c.ImportKey(*name, *kind, secret, *account)
 		if err != nil {
 			return err
 		}

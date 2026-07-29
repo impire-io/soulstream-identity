@@ -39,17 +39,27 @@ const jwtPrefix = "eyJ"
 type Issuer struct {
 	vault       *vault.Vault
 	reg         *registry.Registry
-	tokens      Store
-	authKeyName string // vault name of the AUTH account signing key (D21)
+	api         *APITokenValidator // the sit_ lane (D22)
+	oidc        *OIDCValidator     // the eyJ lane (D23); nil = lane disabled
+	authKeyName string             // vault name of the AUTH account signing key (D21)
 	ttl         time.Duration
 	calloutKey  nkeys.KeyPair // optional curve key; set when requests arrive sealed
 	log         *slog.Logger
 }
 
+// IssuerOption configures optional issuer behavior at construction.
+type IssuerOption func(*Issuer)
+
+// WithOIDC enables the eyJ lane with a constructed validator (D23). Without
+// it, eyJ credentials refuse early — the lane fails closed by absence.
+func WithOIDC(v *OIDCValidator) IssuerOption {
+	return func(i *Issuer) { i.oidc = v }
+}
+
 // NewIssuer builds the issuer. calloutXKeySeed may be empty for deployments
 // whose AUTH account declares no authorization xkey; ttl bounds every issued
 // credential and is the revocation propagation bound (D22).
-func NewIssuer(v *vault.Vault, reg *registry.Registry, tokens Store, authKeyName string, ttl time.Duration, calloutXKeySeed string, log *slog.Logger) (*Issuer, error) {
+func NewIssuer(v *vault.Vault, reg *registry.Registry, tokens Store, authKeyName string, ttl time.Duration, calloutXKeySeed string, log *slog.Logger, opts ...IssuerOption) (*Issuer, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -59,13 +69,16 @@ func NewIssuer(v *vault.Vault, reg *registry.Registry, tokens Store, authKeyName
 	if ttl <= 0 {
 		return nil, errors.New("callout: a positive ttl is required")
 	}
-	i := &Issuer{vault: v, reg: reg, tokens: tokens, authKeyName: authKeyName, ttl: ttl, log: log}
+	i := &Issuer{vault: v, reg: reg, api: NewAPITokenValidator(tokens), authKeyName: authKeyName, ttl: ttl, log: log}
 	if seed := strings.TrimSpace(calloutXKeySeed); seed != "" {
 		kp, err := nkeys.FromCurveSeed([]byte(seed))
 		if err != nil {
 			return nil, fmt.Errorf("callout: callout key is not a curve (SX…) seed: %w", err)
 		}
 		i.calloutKey = kp
+	}
+	for _, opt := range opts {
+		opt(i)
 	}
 	return i, nil
 }
@@ -139,25 +152,116 @@ func (i *Issuer) respond(data []byte, serverXKey string) []byte {
 	return out
 }
 
-// decide is D22's pipeline: validate the token, then authorize-and-mint via
-// the registry row's role key for the server-assigned user key.
+// decide is D22's pipeline behind the D23 dispatch: the credential's shape
+// selects the lane — no probing order, no precedence — then each lane runs
+// validate, authorize, and the shared mint.
 func (i *Issuer) decide(req *jwt.AuthorizationRequestClaims) (string, error) {
-	rec, err := Validate(i.tokens, req.ConnectOptions.Token)
+	cred := req.ConnectOptions.Token
+	switch {
+	case strings.HasPrefix(cred, TokenPrefix):
+		return i.decideToken(req, cred)
+	case strings.HasPrefix(cred, jwtPrefix):
+		return i.decideOIDC(req, cred)
+	default:
+		i.log.Warn("callout REFUSED", "err", "credential shape unknown",
+			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
+		return "", errors.New("credential rejected")
+	}
+}
+
+// decideToken is the sit_ lane: digest validation, then authorize-and-mint
+// via the registry row's role key (D22's registry-declared source).
+func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (string, error) {
+	sub, err := i.api.Validate(cred)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "err", err.Error(),
 			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
 		return "", errors.New("credential rejected")
 	}
-	userJWT, err := mint.ForKey(i.vault, i.reg, rec.Account, rec.User, req.UserNkey, i.ttl)
+	userJWT, err := mint.ForKey(i.vault, i.reg, sub.Account, sub.User, req.UserNkey, i.ttl)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "err", err.Error(),
-			"account", rec.Account, "user", rec.User, "label", rec.Label,
+			"account", sub.Account, "user", sub.User, "label", sub.Label,
 			"client_host", req.ClientInformation.Host)
 		return "", errors.New("identity not authorized")
 	}
 	// The attribution the M4 gate requires: external identity, label, host.
-	i.log.Info("callout ADMITTED", "account", rec.Account, "user", rec.User,
-		"label", rec.Label, "client_host", req.ClientInformation.Host,
+	i.log.Info("callout ADMITTED", "account", sub.Account, "user", sub.User,
+		"label", sub.Label, "client_host", req.ClientInformation.Host,
 		"user_nkey", req.UserNkey, "ttl", i.ttl.String())
 	return userJWT, nil
+}
+
+// decideOIDC is the eyJ lane (D23/D24): validate against the pinned issuer,
+// authorize by the declared team the roles claim names, mint for the
+// server-assigned key. The claims path never confers admin or personas —
+// the mint issues the same scoped, permission-less claims as every lane.
+func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (string, error) {
+	if i.oidc == nil {
+		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", "oidc lane not configured",
+			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
+		return "", errors.New("credential rejected")
+	}
+	sub, err := i.oidc.Validate(cred)
+	if err != nil {
+		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
+			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
+		return "", errors.New("credential rejected")
+	}
+	team, err := i.teamFor(sub.Roles)
+	if err != nil {
+		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
+			"issuer", sub.Issuer, "subject", sub.OID,
+			"client_host", req.ClientInformation.Host)
+		return "", errors.New("identity not authorized")
+	}
+	userJWT, err := mint.ForTeam(i.vault, team, sub.OID, req.UserNkey, i.ttl)
+	if err != nil {
+		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
+			"issuer", sub.Issuer, "subject", sub.OID, "team", team,
+			"client_host", req.ClientInformation.Host)
+		return "", errors.New("identity not authorized")
+	}
+	display := sub.Display
+	if display == "" {
+		display = "-" // app-only tokens carry no preferred_username
+	}
+	i.log.Info("callout ADMITTED", "lane", string(LaneOIDC), "issuer", sub.Issuer,
+		"subject", sub.OID, "team", team, "display", display,
+		"client_host", req.ClientInformation.Host,
+		"user_nkey", req.UserNkey, "ttl", i.ttl.String())
+	return userJWT, nil
+}
+
+// teamFor is D24's authorize: exactly one role value must name a declared
+// team — an account signing key carrying its account binding. Values naming
+// nothing are inert (the tenant cannot invent teams); more than one match
+// is ambiguous and refuses, because claim order must never decide
+// authorization.
+func (i *Issuer) teamFor(roles []string) (string, error) {
+	if len(roles) == 0 {
+		return "", errors.New("token carries no roles claim")
+	}
+	var teams []string
+	for _, role := range roles {
+		if role == i.authKeyName {
+			continue // the issuer's own signing key is infrastructure, never a team
+		}
+		e, err := i.vault.Get(role)
+		if err != nil {
+			continue // undeclared (or unresolvable) role values are inert
+		}
+		if e.Kind != vault.KindNATSAccountSigningKey || e.Account == "" {
+			continue
+		}
+		teams = append(teams, role)
+	}
+	switch len(teams) {
+	case 0:
+		return "", fmt.Errorf("no declared team among roles %v", roles)
+	case 1:
+		return teams[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous teams %v", teams)
+	}
 }

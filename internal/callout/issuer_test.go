@@ -23,14 +23,18 @@ func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string,
 	if err != nil {
 		t.Fatalf("vault: %v", err)
 	}
+	accKP, _ := nkeys.CreateAccount()
+	accPub, _ := accKP.PublicKey()
 	roleKP, _ := nkeys.CreateAccount()
 	roleSeed, _ := roleKP.Seed()
-	if _, err := v.Import("acme/role", vault.KindNATSAccountSigningKey, string(roleSeed)); err != nil {
+	if _, err := v.Import("acme/role", vault.KindNATSAccountSigningKey, string(roleSeed), accPub); err != nil {
 		t.Fatalf("import role: %v", err)
 	}
+	authAccKP, _ := nkeys.CreateAccount()
+	authAccPub, _ := authAccKP.PublicKey()
 	authKP, _ := nkeys.CreateAccount()
 	authSeed, _ := authKP.Seed()
-	authEntry, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed))
+	authEntry, err := v.Import("auth/issuer", vault.KindNATSAccountSigningKey, string(authSeed), authAccPub)
 	if err != nil {
 		t.Fatalf("import auth key: %v", err)
 	}
@@ -38,8 +42,6 @@ func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string,
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	accKP, _ := nkeys.CreateAccount()
-	accPub, _ := accKP.PublicKey()
 	if err := reg.Put(registry.Identity{Account: accPub, User: "daan", Role: "acme/role"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}

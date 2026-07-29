@@ -33,11 +33,14 @@ const (
 	KindPersonaSigningKey Kind = "persona-signing-key"
 )
 
-// Entry is a vault key as the API shows it: never the secret.
+// Entry is a vault key as the API shows it: never the secret. Account is
+// the account identity an account signing key signs for — the team object's
+// binding (hq/02-DESIGN/auth-callout.md D24); empty for other kinds.
 type Entry struct {
 	Name      string `json:"name"`
 	Kind      Kind   `json:"kind"`
 	PublicKey string `json:"public_key"`
+	Account   string `json:"account,omitempty"`
 }
 
 // Sentinel errors; the service maps them to wire errors.
@@ -59,11 +62,13 @@ type Store interface {
 }
 
 // stored is the record shape sealed into the backend. Secret is the seed in
-// its kind's native encoding.
+// its kind's native encoding. Account binds an account signing key to the
+// account identity it signs for (D24); empty for other kinds.
 type stored struct {
 	Kind      Kind   `json:"kind"`
 	Secret    string `json:"secret"`
 	PublicKey string `json:"public_key"`
+	Account   string `json:"account,omitempty"`
 }
 
 // Vault seals records to the first key and hands the backend ciphertext only.
@@ -166,15 +171,25 @@ func derive(kind Kind, secret string) (string, error) {
 
 // Import stores a secret under name. Existing names are refused, never
 // overwritten — a changed key is indistinguishable from a substitution.
-func (v *Vault) Import(name string, kind Kind, secret string) (Entry, error) {
+// account is the account identity an account signing key signs for —
+// required for that kind (the key name is the team name; the binding
+// completes the team object, D24) and refused for every other kind.
+func (v *Vault) Import(name string, kind Kind, secret, account string) (Entry, error) {
 	if err := checkName(name); err != nil {
 		return Entry{}, err
+	}
+	if kind == KindNATSAccountSigningKey {
+		if !nkeys.IsValidPublicAccountKey(account) {
+			return Entry{}, fmt.Errorf("vault: an account signing key needs its account binding (a public account key, got %q)", account)
+		}
+	} else if account != "" {
+		return Entry{}, fmt.Errorf("vault: %q keys carry no account binding", kind)
 	}
 	pub, err := derive(kind, secret)
 	if err != nil {
 		return Entry{}, err
 	}
-	plain, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub})
+	plain, err := json.Marshal(stored{Kind: kind, Secret: secret, PublicKey: pub, Account: account})
 	if err != nil {
 		return Entry{}, fmt.Errorf("vault: encode key: %w", err)
 	}
@@ -185,7 +200,7 @@ func (v *Vault) Import(name string, kind Kind, secret string) (Entry, error) {
 	if err := v.store.Create(name, sealed); err != nil {
 		return Entry{}, err
 	}
-	return Entry{Name: name, Kind: kind, PublicKey: pub}, nil
+	return Entry{Name: name, Kind: kind, PublicKey: pub, Account: account}, nil
 }
 
 // GenerateUserKey creates a NATS user key inside the vault, or returns the
@@ -208,7 +223,7 @@ func (v *Vault) GenerateUserKey(name string) (Entry, error) {
 	if err != nil {
 		return Entry{}, fmt.Errorf("vault: read generated seed: %w", err)
 	}
-	return v.Import(name, KindNATSUserKey, string(seed))
+	return v.Import(name, KindNATSUserKey, string(seed), "")
 }
 
 func (v *Vault) load(name string) (stored, error) {
@@ -236,7 +251,7 @@ func (v *Vault) Get(name string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	return Entry{Name: name, Kind: s.Kind, PublicKey: s.PublicKey}, nil
+	return Entry{Name: name, Kind: s.Kind, PublicKey: s.PublicKey, Account: s.Account}, nil
 }
 
 // List returns every entry (public form), sorted by name.

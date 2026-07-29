@@ -30,6 +30,9 @@ type Key struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	PublicKey string `json:"public_key"`
+	// Account is the account identity an account signing key signs for —
+	// the team's binding (D24); empty for other kinds.
+	Account string `json:"account,omitempty"`
 }
 
 // Vault key kinds (the service's vocabulary).
@@ -214,12 +217,15 @@ func (c *Client) Status() (string, error) {
 	return out.Version, nil
 }
 
-// ImportKey stores a secret in the vault (write-only; the response carries the
-// public key). Existing names are refused. Admin identities only.
-func (c *Client) ImportKey(name, kind, secret string) (Key, error) {
+// ImportKey stores a secret in the vault (write-only; the response carries
+// the public key). Existing names are refused. account is the account
+// identity an account signing key signs for — required for that kind (the
+// key name is the team name, D24), empty for other kinds. Admin identities
+// only.
+func (c *Client) ImportKey(name, kind, secret, account string) (Key, error) {
 	var out Key
 	err := c.call("keys.import", map[string]string{
-		"name": name, "kind": kind, "secret": secret,
+		"name": name, "kind": kind, "secret": secret, "account": account,
 	}, &out)
 	return out, err
 }

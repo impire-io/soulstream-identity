@@ -229,10 +229,10 @@ jetstream { store_dir: %q }
 	}
 	t.Cleanup(ncAdmin.Close)
 	admin := client.New(ncAdmin, appPub, "ops")
-	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(roleSeed)); err != nil {
+	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(roleSeed), appPub); err != nil {
 		t.Fatalf("import role key: %v", err)
 	}
-	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed)); err != nil {
+	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub); err != nil {
 		t.Fatalf("import auth key: %v", err)
 	}
 	created, err := admin.CreateToken(appPub, "daan-ext", "daan laptop", 0)

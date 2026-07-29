@@ -32,7 +32,7 @@ func harness(t *testing.T) (*vault.Vault, *registry.Registry, string, string) {
 	accPub, _ := accKP.PublicKey()
 	askKP, _ := nkeys.CreateAccount() // signing keys are account-typed nkeys
 	askSeed, _ := askKP.Seed()
-	askEntry, err := v.Import("acme/persona-role", vault.KindNATSAccountSigningKey, string(askSeed))
+	askEntry, err := v.Import("acme/persona-role", vault.KindNATSAccountSigningKey, string(askSeed), accPub)
 	if err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}

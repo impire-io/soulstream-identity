@@ -191,7 +191,7 @@ func TestMintSelfOrAdmin(t *testing.T) {
 	askKP, _ := nkeys.CreateAccount()
 	askSeed, _ := askKP.Seed()
 	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
-		Name: "acme/role", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed),
+		Name: "acme/role", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed), Account: acc,
 	}, nil); err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}
@@ -227,16 +227,16 @@ func TestTokenAndSentinelOps(t *testing.T) {
 		t.Fatalf("token op without callout config: %v", err)
 	}
 
+	authAccKP, _ := nkeys.CreateAccount()
+	authAccPub, _ := authAccKP.PublicKey()
 	authKP, _ := nkeys.CreateAccount()
 	authSeed, _ := authKP.Seed()
 	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
-		Name: "auth/issuer", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(authSeed),
+		Name: "auth/issuer", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(authSeed), Account: authAccPub,
 	}, nil); err != nil {
 		t.Fatalf("import auth key: %v", err)
 	}
 	store := callout.NewMemTokenStore()
-	authAccKP, _ := nkeys.CreateAccount()
-	authAccPub, _ := authAccKP.PublicKey()
 	WithCallout(store, "auth/issuer", authAccPub)(s)
 
 	// Admin-gated like the rest of management.

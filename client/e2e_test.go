@@ -197,12 +197,12 @@ jetstream { store_dir: %q }
 	if _, err := admin.Status(); err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(askSeed)); err != nil {
+	if _, err := admin.ImportKey("acme/role", client.KindNATSAccountSigningKey, string(askSeed), accPub); err != nil {
 		t.Fatalf("import signing key: %v", err)
 	}
 	_, personaPriv, _ := ed25519.GenerateKey(nil)
 	personaSeed := base64.StdEncoding.EncodeToString(personaPriv.Seed())
-	personaEntry, err := admin.ImportKey(client.PersonaKeyName("daan"), client.KindPersonaSigningKey, personaSeed)
+	personaEntry, err := admin.ImportKey(client.PersonaKeyName("daan"), client.KindPersonaSigningKey, personaSeed, "")
 	if err != nil {
 		t.Fatalf("import persona key: %v", err)
 	}

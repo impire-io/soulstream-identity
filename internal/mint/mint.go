@@ -83,23 +83,53 @@ func Mint(v *vault.Vault, reg *registry.Registry, account, user string) (Result,
 // ForKey issues an ephemeral scoped user JWT for a caller-provided user
 // public key — the auth-callout path (hq/02-DESIGN/auth-callout.md D20),
 // where the key is server-assigned and no vault key exists or is created.
+// The authorize stage is the registry row (D22's registry-declared source);
 // ttl bounds the credential and is the revocation propagation bound (D22).
 func ForKey(v *vault.Vault, reg *registry.Registry, account, user, userPub string, ttl time.Duration) (string, error) {
+	kp, err := roleKey(v, reg, account, user)
+	if err != nil {
+		return "", err
+	}
+	return ephemeral(kp, account, user, userPub, ttl)
+}
+
+// ForTeam issues an ephemeral scoped user JWT for the claims-derived lane
+// (D24): the team name resolves directly to its vault signing key and the
+// account binding recorded at import — no registry row, no mapping store.
+// subject names the external identity (the stable oid) for attribution.
+func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration) (string, error) {
+	e, err := v.Get(team)
+	if err != nil {
+		return "", fmt.Errorf("mint: no declared team %q: %w", team, err)
+	}
+	if e.Kind != vault.KindNATSAccountSigningKey {
+		return "", fmt.Errorf("mint: team %q is %q, want %q", team, e.Kind, vault.KindNATSAccountSigningKey)
+	}
+	if e.Account == "" {
+		return "", fmt.Errorf("mint: team %q has no account binding — reimport it with its account", team)
+	}
+	kp, err := v.KeyPair(team)
+	if err != nil {
+		return "", err
+	}
+	return ephemeral(kp, e.Account, subject, userPub, ttl)
+}
+
+// ephemeral is the shared mint tail (D20): scoped, permission-less,
+// TTL-bounded claims for the server-assigned key, signed by the resolved
+// signing key. Both authorize sources (registry row, declared team) end here.
+func ephemeral(kp nkeys.KeyPair, account, name, userPub string, ttl time.Duration) (string, error) {
 	if !nkeys.IsValidPublicUserKey(userPub) {
 		return "", fmt.Errorf("mint: %q is not a user public key", userPub)
 	}
 	if ttl <= 0 {
 		return "", errors.New("mint: an ephemeral mint needs a positive ttl")
 	}
-	kp, err := roleKey(v, reg, account, user)
-	if err != nil {
-		return "", err
-	}
-	uc := claims(userPub, account, user)
+	uc := claims(userPub, account, name)
 	uc.Expires = time.Now().Add(ttl).Unix()
 	token, err := uc.Encode(kp)
 	if err != nil {
-		return "", fmt.Errorf("mint: encode ephemeral JWT for %s/%s: %w", account, user, err)
+		return "", fmt.Errorf("mint: encode ephemeral JWT for %s/%s: %w", account, name, err)
 	}
 	return token, nil
 }

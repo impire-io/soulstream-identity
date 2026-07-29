@@ -178,6 +178,9 @@ type importKeyRequest struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
 	Secret string `json:"secret"`
+	// Account binds an account signing key to the account it signs for
+	// (required for that kind — the team object, D24); empty otherwise.
+	Account string `json:"account,omitempty"`
 }
 
 type keysResponse struct {
@@ -288,11 +291,11 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		entry, err := s.vault.Import(req.Name, vault.Kind(req.Kind), req.Secret)
+		entry, err := s.vault.Import(req.Name, vault.Kind(req.Kind), req.Secret, req.Account)
 		if err != nil {
 			return nil, err
 		}
-		s.allow(account, user, op, "key", entry.Name, "kind", entry.Kind)
+		s.allow(account, user, op, "key", entry.Name, "kind", entry.Kind, "account", entry.Account)
 		return entry, nil
 
 	case "identities.list":
