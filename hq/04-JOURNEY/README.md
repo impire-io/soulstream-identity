@@ -15,7 +15,25 @@ because a refuted assumption is as load-bearing as the shipped code.
 > [`../00-GENESIS/how-we-work.md`](../00-GENESIS/how-we-work.md); the
 > numbering and index are enforced by `internal/hqlint`.
 
-## Where things stand (2026-07-28)
+## Where things stand (2026-07-29)
+
+**The Entra/OIDC lane is open — role == team, no mapping store**
+([episode 0012](0012-entra-role-claim-lane.md); D23–D24 in
+[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), built as
+spec-driven feature `specs/001-entra-oidc-backend/` through the newly
+enabled speckit flow): an external client presents an Entra access token
+instead of an API token; the issuer validates it against one pinned
+issuer/audience via JWKS discovery (fail-closed, key rollover without
+restart) and authorizes by the `roles` claim — the role value IS the team
+name, resolving directly against the vault's account signing keys, which
+now carry their account binding at import. D22's sketched rule table was
+refuted before it was built; no catalog, no per-user entries; admin and
+personas never come from claims. Gate met on the stub rig [measured]:
+sealed-leg admission with full attribution, the nine-row refusal matrix,
+`sit_` lane untouched, and the accepted revocation asymmetry demonstrated
+(token lifetime + one TTL; cached token re-admitted 5.2 s after connect
+at a 5 s TTL). Real-tenant verification is a documented manual runbook.
+Next in the execution order remains **M2 — consumers wire in**.
 
 **The subject space gained its ecosystem namespace**
 ([episode 0011](0011-the-shared-subject-prefix.md), D14 amended at the
@@ -124,3 +142,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0009 | [The claims-mapping shape: one pipeline, policy never in the credential store](0009-claims-mapping-shape.md) |
 | 0010 | [M4: auth callout ships, the front door opens](0010-m4-auth-callout-ships.md) |
 | 0011 | [The shared subject prefix: one namespace for the ecosystem](0011-the-shared-subject-prefix.md) |
+| 0012 | [The Entra lane: role == team, no mapping store](0012-entra-role-claim-lane.md) |

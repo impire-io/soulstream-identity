@@ -4,7 +4,21 @@
 SoulIdentity is; this document decides what gets built first and behind which
 gate.*
 
-## Where we are (2026-07-28)
+## Where we are (2026-07-29)
+
+**The Entra/OIDC lane — shipped 2026-07-29**
+([journey 0012](../04-JOURNEY/0012-entra-role-claim-lane.md), D23–D24 in
+[`../02-DESIGN/auth-callout.md`](../02-DESIGN/auth-callout.md), feature
+`specs/001-entra-oidc-backend/` on the speckit flow): the second authn
+backend on the D22 pipeline. Role == team — the token's app-role value
+resolves directly against the declared teams (account signing keys with
+their new account binding); no rule table, no catalog, no per-user
+entries; admin/personas never from claims. Gate met on the local-stub rig
+[measured]: sealed admission with attribution, nine-row refusal matrix,
+JWKS fail-closed with restart-free key rollover, `sit_` lane untouched,
+revocation bound (token lifetime + one TTL) demonstrated and accepted.
+Real-tenant verification: the manual runbook in the feature's
+`quickstart.md`. Next in the execution order: **M2 — consumers wire in**.
 
 **Milestone 4 — auth callout, the front door — shipped 2026-07-28**
 ([journey 0010](../04-JOURNEY/0010-m4-auth-callout-ships.md), design
@@ -14,10 +28,9 @@ issuer on a dedicated AUTH account — sentinel + API token in,
 TTL-bounded scoped JWT for the server-assigned key out, token management
 and sentinel minting as admin-gated surface ops. Gate met [measured]:
 attribution in the audit, bypass lane untouched by the issuer, invalid and
-revoked tokens refused, xkey-sealed callout requests proven. Next in the
-execution order: **M2 — consumers wire in**. Entra/OIDC is validator
-configuration on the D22 interface when it comes; NGS remains an open
-research question blocked on operator portal access.
+revoked tokens refused, xkey-sealed callout requests proven. Entra/OIDC
+landed 2026-07-29 as the second backend (D23–D24, entry above); NGS
+remains an open research question blocked on operator portal access.
 
 **Milestone 3 — the NATS-native rebuild — shipped 2026-07-28**
 ([journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md), design
@@ -85,7 +98,7 @@ arrive over the NATS surface).
 4. ✅ **M4 — auth callout, the front door** (shipped 2026-07-28,
    [journey 0010](../04-JOURNEY/0010-m4-auth-callout-ships.md)).
    SoulIdentity as the NATS auth-callout issuer, API-token backend first
-   (Entra/OIDC later as validator config on the same D22 interface),
+   (Entra/OIDC landed 2026-07-29 as D23–D24, journey 0012),
    issuing TTL-bounded ephemeral JWTs for the server-assigned user key —
    authorization from the registry row, the creds-file bypass drawn in
    callout config (D12). Realized the design in

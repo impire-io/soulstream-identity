@@ -53,6 +53,6 @@ sets as stub fixtures if they differ.
    confirm refusal after the cached token expires (the accepted bound:
    token lifetime + one callout TTL).
 
-**Durable home note**: when this feature lands, this runbook's substance
-graduates into the design docs / implementation docs with the merge; the
-spec folder is not the long-term home.
+**Durable home note**: unlike `hq/01-RESEARCH` topics, speckit feature
+folders persist in git — this runbook's durable home is this file, and
+the design doc (D23 in `hq/02-DESIGN/auth-callout.md`) points here.

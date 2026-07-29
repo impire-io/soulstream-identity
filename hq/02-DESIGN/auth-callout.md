@@ -2,12 +2,15 @@
 
 *The design M4 implements: SoulIdentity as the NATS auth-callout issuer —
 the second lane of the connection ladder (D12), representing external
-identities inside NATS. Decisions here continue the numbering: D19–D22,
+identities inside NATS. Decisions here continue the numbering: D19–D24,
 grounded in the sentinel-credential and claims-mapping research
 ([journey 0008](../04-JOURNEY/0008-sentinel-credential-flow.md),
 [journey 0009](../04-JOURNEY/0009-claims-mapping-shape.md)) [measured
-where tagged]. The first authn backend is API tokens; Entra/OIDC follows
-as configuration on the same shape (D22). The milestone and gate live in
+where tagged]. The first authn backend is API tokens (D19–D22); the
+Entra/OIDC lane landed 2026-07-29 as the second backend on the same
+pipeline (D23–D24, spec-driven feature `specs/001-entra-oidc-backend`,
+[journey 0012](../04-JOURNEY/0012-entra-role-claim-lane.md)). The
+milestone and gate live in
 [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md).*
 
 ## D19 — The connection contract: URL plus credential, sentinel underneath
@@ -102,17 +105,19 @@ one declared pipeline:
    record *names* an identity and carries nothing else; the store holds
    digests, never plaintext (shown once at issuance) [measured]. Unsalted
    SHA-256 is honest only because tokens are generated high-entropy
-   (256-bit); this is explicitly not a password scheme. The later
-   Entra/OIDC validator is configuration: issuer allow-list, JWKS,
-   audience, and the claim that names the subject.
+   (256-bit); this is explicitly not a password scheme. The Entra/OIDC
+   validator is configuration — one pinned issuer, the audience, JWKS
+   via discovery — realized as D23's validator seam [measured].
 2. **authorize(subject, claims) → (account, user, role, personas,
    admin).** For API tokens this is exactly the registry row (the
    registry-declared source, D2); a token mapping to no row is refused
-   [measured]. Entra adds the claims-derived source D2 already names —
-   declared team rules `(issuer, team-claim value) → {account, role,
-   personas}` — as a fallback behind the registry row, feeding the same
-   stage; the interface does not change.
-3. **mint** — the existing D20 path, unchanged.
+   [measured]. *(Amended 2026-07-29:)* the claims-derived source this
+   section originally sketched as declared team rules
+   `(issuer, team-claim value) → {account, role, personas}` behind the
+   registry row was **superseded before it was built** — the maintainer
+   rejected the rule table; the built shape is D24's role == team, with
+   the two lanes disjoint for membership (no fallback, no cross-lookup).
+3. **mint** — the existing D20 path, unchanged (shared by both lanes).
 
 The credential store and the policy store are different stores with
 different custody rules, meeting only in `authorize`. Two operational
@@ -133,6 +138,91 @@ appears exactly once, in the create response.
 **Reversal condition** (inherited from D12's watch): any policy field —
 permission, persona, role — proposed for the token record schema, or a
 claim rule overriding a registry column per user, demotes claims-derived
+authorization to a bootstrap convenience and returns the registry to sole
+policy source.
+
+## D23 — The validator seam and shape dispatch
+
+*Decided 2026-07-29 (feature `001-entra-oidc-backend`, journey 0012).*
+D22's authn-backend seam exists in code because the design names its second
+backend, not as a plugin point (constitution III): a `Validator` proves a
+presented credential names an external subject; authorization stays in the
+issuer; mint is shared. The API-token validator wraps the digest lookup
+unchanged. The OIDC validator is configuration made concrete —
+`--oidc-issuer` / `--oidc-audience` (env fallbacks
+`SOULIDENTITY_OIDC_*`); both present enables the lane, discovery runs at
+startup and fails closed — verifying signature, exact issuer, audience,
+and validity window against the issuer's published keys (go-oidc/v3,
+RS256 pinned; HS256 and `none` refuse [measured]). The verifier refetches
+the key set on an unknown `kid`, so provider key rollover needs no
+restart, and an unreachable JWKS refuses rather than admits [measured].
+
+**Dispatch is by credential shape, with no precedence**: `sit_…` → the
+token lane; `eyJ…` → the OIDC lane, refusing early when the lane is not
+configured (no token-store lookup is ever attempted); any other shape
+refuses [measured]. Wire refusals stay generic (D20); the specific reason
+— audience, expiry, undeclared team, lane disabled — lives only in the
+audit log, every admission carrying
+`lane=oidc issuer=… subject=… team=… display=…` attribution [measured].
+
+The automated gate proves the lane against a local stub issuer
+(`internal/oidcstub`); verification against a real Entra tenant — app
+registration, app roles with team-name values, `requestedAccessTokenVersion:
+2`, delegated and app-only tokens — is the manual runbook in
+`specs/001-entra-oidc-backend/quickstart.md`, never part of `make test`.
+
+**Reversal condition**: a consumer credential class that is neither
+`sit_`-prefixed nor an `eyJ` JWT (observable: a consumer blocked at
+connection, recorded as an issue) re-opens dispatch-by-shape.
+
+## D24 — Role == team: the claims-derived authorize without a mapping store
+
+*Decided 2026-07-29 by the maintainer in the feature's clarification
+session, superseding D22's sketched rule table before it was built.* The
+value of the Entra access token's `roles` claim (an app role, assigned in
+the tenant) **is the team name**, and a team is what the vault already
+declares: an account signing key — whose record now carries its **account
+binding** (the account identity it signs for), required at import
+(`keys.import`, `client.ImportKey`, and the key CLI gained the field
+together). There is no catalog, no rule table, no precedence, and no
+per-user entry anywhere; the registry row's `Role` names the same team
+object for the token lane, so both lanes converge on one declared team
+set and differ only in who names the team — the registry row or the
+validated claim.
+
+The authorize rule: **exactly one role value must name a declared team.**
+Zero matches refuse; more than one refuses as ambiguous, because claim
+order must never decide authorization; values naming no team are inert —
+the tenant cannot invent teams, and the issuer's own AUTH signing key is
+never a team [measured]. Delegated (human) and app-only (service
+principal) tokens both admit; the subject is keyed on the stable `oid`
+(users and service principals alike), with `preferred_username` logged
+for legibility and never keyed [measured]. **Admin and personas are never
+derived from claims**: every claims-path mint is scoped, permission-less,
+`admin=false`, persona-free — a person needing either gets a declared
+registry row [measured].
+
+Two costs, named honestly:
+
+- **The revocation bound is asymmetric.** Role removal in the tenant
+  bites only when the cached access token expires: the bound is **token
+  lifetime plus one callout TTL** (≈60–90 min + 15 min at defaults),
+  against the token lane's single TTL. Accepted 2026-07-29 without a
+  maximum-token-age knob (constitution III); the tenant's token-lifetime
+  policy is the lever if it must shrink. On the 5-second-TTL rig: the
+  still-valid cached token re-admitted 5.2 s after connect, the
+  role-stripped fresh token refused [measured].
+- **Membership custody is delegated.** An Azure portal act (app-role
+  assignment) grants NATS access with no SoulIdentity act; the
+  SoulIdentity-side guard is that a team of that name must be declared,
+  bounding the blast radius to the declared teams' server-enforced
+  scopes; the who-record for this lane is the tenant's assignment audit.
+  Accepted after the adversarial pass (spec `001-entra-oidc-backend`,
+  Clarifications).
+
+**Reversal condition** (D22's watch, restated for the built shape): any
+per-user or per-subject entry proposed for claims-path configuration, or
+admin/personas derived from any claim, demotes claims-derived
 authorization to a bootstrap convenience and returns the registry to sole
 policy source.
 

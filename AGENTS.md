@@ -17,7 +17,7 @@ non-negotiables.
 2. `hq/04-JOURNEY/README.md` — where things stand + the episode index.
 3. `hq/03-IMPLEMENTATION/ROADMAP.md` — the milestones and their gates.
 4. `hq/02-DESIGN/` — the design docs and their numbered decisions (D1–D13 in
-   `agent.md`, D14–D18 in `nats-surface.md`, D19–D22 in `auth-callout.md`);
+   `agent.md`, D14–D18 in `nats-surface.md`, D19–D24 in `auth-callout.md`);
    code comments cite these D-numbers.
 
 ## Non-negotiables (constitution articles, in brief)

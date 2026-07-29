@@ -29,9 +29,9 @@ Request gains one field:
 ```
 
 - `account` (account identity public key) is **required** when
-  `kind = nats-account-signing-key`; refused otherwise absent/invalid.
-- Ignored (refused as unknown? no — refused invalid) for other kinds:
-  supplying `account` for a non-account-signing-key kind is an error.
+  `kind = nats-account-signing-key`; absent or invalid refuses.
+- Supplying `account` for any other kind is an error — no other kind
+  carries a binding.
 - `client.ImportKey(name, kind, secret string)` becomes
   `ImportKey(name, kind, secret, account string)` (breaking pre-release
   change; no tagged release exists). `keys.list` / `client.Keys()` entries

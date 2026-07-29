@@ -15,9 +15,9 @@ the same commit.
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `github.com/coreos/go-oidc/v3` dependency (`go get`, tidy) in
+- [X] T001 Add `github.com/coreos/go-oidc/v3` dependency (`go get`, tidy) in
       go.mod / go.sum (research R2)
-- [ ] T002 [P] Create test-only local OIDC issuer package in
+- [X] T002 [P] Create test-only local OIDC issuer package in
       internal/oidcstub/oidcstub.go: httptest server serving
       `/.well-known/openid-configuration` + JWKS; RS256 signing with
       Entra-v2.0-shaped claims (iss, aud, oid, tid, roles, ver, iat/nbf/exp);
@@ -26,25 +26,25 @@ the same commit.
 
 ## Phase 2: Foundational (blocking all user stories)
 
-- [ ] T003 Extend vault account-signing-key record with required `Account`
+- [X] T003 Extend vault account-signing-key record with required `Account`
       binding: `stored`/`Entry` gain the field, `Import` gains the account
       parameter with validation (required + valid `A…` for
       KindNATSAccountSigningKey, refused for other kinds) in
       internal/vault/vault.go; update internal/vault/vault_test.go
       (data-model Team; research R1)
-- [ ] T004 Carry `account` through the `keys.import` wire op (required for
+- [X] T004 Carry `account` through the `keys.import` wire op (required for
       account signing keys; refusal rules per contracts/entra-lane.md §2) in
       internal/service/service.go; update internal/service/service_test.go
-- [ ] T005 Mirror the wire change in the public client: `ImportKey` gains
+- [X] T005 Mirror the wire change in the public client: `ImportKey` gains
       the account parameter; `Key` entries expose the read-only account
       field in client/client.go (same-commit rule with T004)
-- [ ] T006 Lift the authorize stage out of `ForKey` in internal/mint/mint.go:
+- [X] T006 Lift the authorize stage out of `ForKey` in internal/mint/mint.go:
       keep the registry path (`roleKey`) intact; add `ForTeam(v, team,
       subject, userPub, ttl)` resolving the team entry (kind + account
       binding checks, refusal reasons per data-model) and minting with
       Name=subject, IssuerAccount=team account; update
       internal/mint/mint_test.go
-- [ ] T007 Introduce the Validator seam in internal/callout/validator.go
+- [X] T007 Introduce the Validator seam in internal/callout/validator.go
       (D22's authn-backend seam): `Validator` interface, `APITokenValidator`
       wrapping the existing `Store` + `Validate`, and shape dispatch in
       `Issuer.decide` (`sit_` → API token, `eyJ` → OIDC-if-configured else
@@ -63,25 +63,25 @@ attribution; no per-person record anywhere.
 
 **Independent Test**: spec US1 acceptance scenarios 1–3 on the rig.
 
-- [ ] T008 [US1] Implement `OIDCValidator` in internal/callout/validator.go:
+- [X] T008 [US1] Implement `OIDCValidator` in internal/callout/validator.go:
       go-oidc provider/verifier (exact issuer, audience, RS256 pin),
       fail-closed construction and verification, claims extraction (oid,
       roles, preferred_username, tid) per data-model External subject
-- [ ] T009 [US1] Wire the OIDC path in `Issuer.decide` in
+- [X] T009 [US1] Wire the OIDC path in `Issuer.decide` in
       internal/callout/issuer.go: exactly-one-declared-team rule (zero →
       refuse, >1 declared matches → ambiguous; undeclared values ignored),
       `mint.ForTeam`, `admin=false`/no-personas invariant, audit line
       `callout ADMITTED lane=oidc issuer=… subject=… team=… display=…`
       per contracts §4
-- [ ] T010 [US1] Add lane configuration to `cmdServe` in
+- [X] T010 [US1] Add lane configuration to `cmdServe` in
       cmd/soulidentity/main.go: `--oidc-issuer`/`SOULIDENTITY_OIDC_ISSUER`,
       `--oidc-audience`/`SOULIDENTITY_OIDC_AUDIENCE`; both present → lane
       constructed at startup (discovery fail-closed), else disabled
       (research R7, contracts §3)
-- [ ] T011 [P] [US1] Unit tests in internal/callout/issuer_test.go: stub-token
+- [X] T011 [P] [US1] Unit tests in internal/callout/issuer_test.go: stub-token
       admission with scoped/bounded claims, attribution fields asserted,
       sealed round-trip on the OIDC path (mirrors the existing harness)
-- [ ] T012 [US1] E2E `TestEntraGateAgainstOperatorModeServer` in
+- [X] T012 [US1] E2E `TestEntraGateAgainstOperatorModeServer` in
       client/callout_e2e_test.go: operator-mode rig + oidcstub; bar 1 —
       admission through the sealed leg, in-scope round-trip, out-of-scope
       denied by the server, audit attribution (issuer, oid, team, host);
@@ -96,17 +96,17 @@ infrastructure, and legibility of the declared state.
 
 **Independent Test**: spec US2 acceptance scenarios + SC-002/004/007.
 
-- [ ] T013 [P] [US2] Unit refusal matrix in internal/callout/issuer_test.go:
+- [X] T013 [P] [US2] Unit refusal matrix in internal/callout/issuer_test.go:
       wrong audience / expired / signature by never-published key /
       non-allow-listed issuer / roles absent / role naming no declared team /
       two declared teams (ambiguous) / alg HS256-and-none — 8/8 refused,
       generic wire error, specific audit reason (SC-002)
-- [ ] T014 [P] [US2] Unit key-infrastructure rows in
+- [X] T014 [P] [US2] Unit key-infrastructure rows in
       internal/callout/issuer_test.go: JWKS endpoint stopped → refusal;
       unknown kid → refusal; stub key rotation → new-key token admits
       without process restart (SC-004; research R2's refetch claim measured
       here)
-- [ ] T015 [US2] E2E rows in client/callout_e2e_test.go: undeclared-team and
+- [X] T015 [US2] E2E rows in client/callout_e2e_test.go: undeclared-team and
       ambiguous refusals at connect with audit reasons; assert the complete
       declared state of the two-account/two-team rig contains zero per-user
       entries and no mapping store (SC-007)
@@ -117,7 +117,7 @@ infrastructure, and legibility of the declared state.
 
 **Independent Test**: spec US3 acceptance scenarios + SC-005.
 
-- [ ] T016 [US3] E2E revocation-bound proof in client/callout_e2e_test.go:
+- [X] T016 [US3] E2E revocation-bound proof in client/callout_e2e_test.go:
       short `--callout-ttl`; admitted OIDC connection disconnected at TTL;
       reconnect with a fresh role-stripped stub token refused; reconnect
       with the still-valid original token re-admitted until expiry — the
@@ -129,7 +129,7 @@ infrastructure, and legibility of the declared state.
 
 **Independent Test**: spec US4 acceptance scenarios + SC-006.
 
-- [ ] T017 [US4] E2E coexistence rows in client/callout_e2e_test.go: with
+- [X] T017 [US4] E2E coexistence rows in client/callout_e2e_test.go: with
       the OIDC lane configured, a `sit_` client admits via digest lookup
       exactly as before (existing `TestM4GateAgainstOperatorModeServer`
       stays green unchanged — SC-006); with the lane unconfigured, an `eyJ`
@@ -138,7 +138,7 @@ infrastructure, and legibility of the declared state.
 
 ## Phase 7: Polish & the hq landing duties (same merge)
 
-- [ ] T018 Design amendment in hq/02-DESIGN/auth-callout.md: D23 (the
+- [X] T018 Design amendment in hq/02-DESIGN/auth-callout.md: D23 (the
       Validator seam + shape dispatch, fail-closed lane enablement), D24
       (role == team — the team object completed by the account binding;
       admin/personas never from claims; the revocation bound stated
@@ -147,14 +147,14 @@ infrastructure, and legibility of the declared state.
       or admin/personas from any claim, demotes claims-derived authorization
       and returns the registry to sole policy source); D22's rule-table
       sketch marked superseded
-- [ ] T019 [P] Update hq/03-IMPLEMENTATION/ROADMAP.md (the Entra lane
+- [X] T019 [P] Update hq/03-IMPLEMENTATION/ROADMAP.md (the Entra lane
       landed — where it sits relative to M2; open questions pruned) and
       hq/04-JOURNEY/README.md Where-things-stand
-- [ ] T020 Journey episode hq/04-JOURNEY/0012-entra-role-claim-lane.md per
+- [X] T020 Journey episode hq/04-JOURNEY/0012-entra-role-claim-lane.md per
       TEMPLATE.md (what happened, honest numbers from the e2e, evidence
       tags, Reversal condition line); index updated; `internal/hqlint`
       green
-- [ ] T021 Graduate the quickstart runbook substance to its durable home per
+- [X] T021 Graduate the quickstart runbook substance to its durable home per
       plan.md (design/implementation docs), leave a pointer in
       specs/001-entra-oidc-backend/quickstart.md; final full `make check` +
       fresh-clone build sanity
