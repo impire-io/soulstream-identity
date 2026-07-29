@@ -30,3 +30,8 @@ Conventions:
 - The journey duty: every landed milestone, concluded research topic, or
   load-bearing decision gets an episode in `hq/04-JOURNEY/` in the same
   change (`/journey-log`; research via `/research-graduate`).
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->

@@ -49,6 +49,12 @@ non-negotiables.
 
 - **Research** runs through `/research-start` → investigate →
   `/research-graduate` (`hq/01-RESEARCH/`).
+- **Feature work is spec-driven via speckit**: `/speckit-specify` →
+  `/speckit-clarify` → `/speckit-plan` → `/speckit-tasks` →
+  `/speckit-implement`, on numbered feature branches with artifacts under
+  `specs/`. The speckit constitution (`.specify/memory/constitution.md`) is a
+  projection of `hq/00-GENESIS/` — on conflict, hq wins. The hq duties below
+  apply unchanged to speckit-driven work.
 - **Implementation** follows the roadmap's milestones against the design docs;
   landing means gate green, roadmap updated, journey episode written, design
   propagated — in the same merge.
