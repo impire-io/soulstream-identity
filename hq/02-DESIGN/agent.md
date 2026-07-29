@@ -414,6 +414,36 @@ trusts with `service.creds` — and the service writes no key material to
 disk, ever. Journey 0004's measurements stand: seal/unseal mechanics and
 ciphertext-only storage are unaffected by how the seed enters the process.
 
+## D27 — One noun: persona
+
+*Decided 2026-07-29 at the operator's direction (journey 0016), ending a
+day of the two words shearing against each other.* The ecosystem speaks
+**one noun for the represented subject — persona** — human, agent, or
+scheduled job, equally first-class. Soulstream fixed the term in its core
+design ("persona is the only noun for an identity, everywhere in the
+spec") and it is baked into its wire — `Soulstream-Author`, the
+`SOULSTREAM.PERSONA.NOTIFY.>` subjects — so any other choice would leave
+the ecosystem speaking two languages forever. The vocabulary, fixed:
+
+- **Persona** — who. The represented subject; realm-unique name; born at
+  first encounter (nothing stored until its artifacts materialize, D26);
+  persona name == user name (one persona per principal's user, D6 as
+  amended).
+- **Principal** — the server-proven (account, user) a connection speaks
+  as (D15's own term). A transport fact, never a second identity concept:
+  credentials are how processes connect, personas are who is speaking —
+  soulstream's line, adopted whole.
+- **Subject** — an external provider's representation (an Entra `oid`, a
+  token record) before it is admitted; the validator seam already says
+  `ExternalSubject` (D23).
+- **"Identity"** survives only in the product name and in "the identity
+  plane" as the layer's description — never as the noun for a represented
+  subject in specs, design, or code comments.
+
+**Reversal condition**: soulstream renaming its own noun (observable: a
+soulstream release changing the `Soulstream-Author` vocabulary or the
+persona subjects) reopens this alignment as a new D-decision.
+
 ## Milestone 1 — the walking skeleton
 
 - `internal/vault` — file-backed keystore: NATS nkey seeds (account signing

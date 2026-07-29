@@ -2,13 +2,15 @@
 
 **The identity plane for the
 [Soulstream](https://github.com/impire-io/soulstream) ecosystem.**
-SoulIdentity is the representation of identity for humans and agents: a
-service that holds account signing keys, user keys, and persona
-record-signing keys, and answers *sign and mint requests* instead of handing
-out keys. Consumers name the identity they act for and receive signatures and
-minted NATS credentials; the seeds never cross the API. Identities arriving
-from the outside world — Entra/OIDC principals, API tokens — get represented
-inside NATS with the right identity and permissions, every mint attributable.
+SoulIdentity is the home of the **persona** — the ecosystem's one noun for
+a represented subject, human or agent alike: a service that holds the
+account signing keys, user keys, and persona record-signing keys, and
+answers *sign and mint requests* instead of handing out keys. Consumers
+name the persona they act for and receive signatures and minted NATS
+credentials; the seeds never cross the API. Identity truth lives in your
+IAM: subjects arriving from the outside world — Entra/OIDC, API tokens —
+get represented inside NATS with the right permissions, their personas
+born on first encounter, every mint attributable.
 
 The surface is NATS-native — request/reply with xkey-sealed end-to-end
 encryption, the caller authenticated by its own NATS identity — and it is

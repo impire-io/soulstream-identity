@@ -1,7 +1,7 @@
 // Package client talks to a SoulIdentity service over NATS request/reply with
 // xkey-sealed payloads (hq/02-DESIGN/nats-surface.md D16). The caller's NATS
 // connection is the authentication: requests ride the caller's own subject
-// prefix, which the server only lets the rightful identity publish to (D15).
+// prefix, which the server only lets the rightful principal publish to (D15).
 //
 // The types here mirror the service's JSON wire contract; this package is the
 // contract's canonical consumer-side definition.
@@ -28,7 +28,7 @@ const Segment = "soulidentity"
 // Key is a vault entry as the service shows it: never the secret. The
 // binding fields are the authorization source (D25): for an account signing
 // key, Account is the account it signs for — the team's binding (D24); for
-// a persona signing key, (Account, User) is the owner identity that may
+// a persona signing key, (Account, User) is the owner principal that may
 // sign with it; both empty for user keys.
 type Key struct {
 	Name      string `json:"name"`
@@ -92,7 +92,7 @@ func WithPrefix(prefix string) Option {
 	}
 }
 
-// New returns a client speaking as (account, user) — the same identity nc is
+// New returns a client speaking as (account, user) — the same principal nc is
 // authenticated as; the server refuses the subject prefix otherwise.
 func New(nc *nats.Conn, account, user string, opts ...Option) *Client {
 	c := &Client{nc: nc, account: account, user: user, timeout: 10 * time.Second, root: Segment}
@@ -213,7 +213,7 @@ func (c *Client) Status() (string, error) {
 
 // ImportKey stores a secret in the vault (write-only; the response carries
 // the public key). Existing names are refused. account and user are the
-// binding (D25): an account signing key requires account — the identity it
+// binding (D25): an account signing key requires account — the account it
 // signs for (the key name is the team name, D24); a persona signing key
 // requires both — its owner; other kinds refuse either. An operator op —
 // the deployment's permission template gates who reaches it.
@@ -243,7 +243,7 @@ func PersonaKeyName(persona string) string {
 
 // SignRecord signs canonical record bytes as persona, returning the base64
 // signature string Soulstream-Sig carries. The service enforces the persona
-// key's owner binding against this client's identity (D6 as amended).
+// key's owner binding against this client's principal (D6 as amended).
 func (c *Client) SignRecord(persona string, canonical []byte) (string, error) {
 	var out struct {
 		Sig       string `json:"sig"`
@@ -281,10 +281,10 @@ type PersonaSigner struct {
 }
 
 // PersonaSigner binds persona to its signer, resolving the public key once
-// through keys.public. The client identity's own persona key materializes
+// through keys.public. The client principal's own persona key materializes
 // in the vault on this first touch (D26) — no provisioning act preceded
 // it. Construction fails when the persona key is owned by another
-// identity (D6 as amended), so a mis-wired signer fails fast, not at
+// principal (D6 as amended), so a mis-wired signer fails fast, not at
 // first publish.
 func (c *Client) PersonaSigner(persona string) (*PersonaSigner, error) {
 	var out Key
@@ -295,12 +295,12 @@ func (c *Client) PersonaSigner(persona string) (*PersonaSigner, error) {
 		return nil, errors.New("soulidentity: keys.public returned no public key")
 	}
 	if out.Account != c.account || out.User != c.user {
-		return nil, fmt.Errorf("soulidentity: persona %q is owned by another identity — this client signs only with its own key", persona)
+		return nil, fmt.Errorf("soulidentity: persona %q is owned by another principal — this client signs only with its own key", persona)
 	}
 	return &PersonaSigner{c: c, persona: persona, pub: out.PublicKey}, nil
 }
 
-// PublicKey returns the persona's public key — the identity this signer
+// PublicKey returns the persona's public key — the persona this signer
 // signs as.
 func (s *PersonaSigner) PublicKey() string { return s.pub }
 
@@ -342,13 +342,13 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 	return out, err
 }
 
-// UserKeyName is the vault name of an identity's minted user key.
+// UserKeyName is the vault name of a principal's minted user key.
 func UserKeyName(account, user string) string {
 	return "user/" + account + "/" + user
 }
 
 // TokenEntry is a stored API token as the service shows it: the digest
-// handle and the declared identity — never the plaintext.
+// handle and the declared principal — never the plaintext.
 type TokenEntry struct {
 	Digest  string `json:"digest"`
 	Account string `json:"account"`
@@ -371,7 +371,7 @@ type SentinelResult struct {
 	Creds string `json:"creds"`
 }
 
-// CreateToken issues an API token for the registered identity; ttl of zero
+// CreateToken issues an API token for a principal; ttl of zero
 // means no expiry. An operator op (D25).
 func (c *Client) CreateToken(account, user, label string, ttl time.Duration) (TokenResult, error) {
 	var out TokenResult
@@ -382,7 +382,7 @@ func (c *Client) CreateToken(account, user, label string, ttl time.Duration) (To
 	return out, err
 }
 
-// Tokens lists the stored API tokens (digests and identities, never
+// Tokens lists the stored API tokens (digests and principals, never
 // plaintext). An operator op (D25).
 func (c *Client) Tokens() ([]TokenEntry, error) {
 	var out struct {

@@ -15,7 +15,7 @@ import (
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// UserKeyName is the vault name of the generated user key for an identity.
+// UserKeyName is the vault name of the generated user key for a principal.
 func UserKeyName(account, user string) string {
 	return "user/" + account + "/" + user
 }
@@ -86,7 +86,7 @@ func ForKey(v *vault.Vault, account, user, userPub string, ttl time.Duration) (s
 // ForTeam issues an ephemeral scoped user JWT for the claims-derived lane
 // (D24): the team name resolves directly to its vault signing key and the
 // account binding recorded at import — no registry row, no mapping store.
-// subject names the external identity (the stable oid) for attribution.
+// subject names the external subject (the stable oid, D27) for attribution.
 func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration) (string, error) {
 	e, err := v.Get(team)
 	if err != nil {

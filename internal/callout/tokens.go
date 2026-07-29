@@ -1,7 +1,7 @@
 // Package callout is SoulIdentity as the NATS auth-callout issuer
 // (hq/02-DESIGN/auth-callout.md): the front door through which external
-// identities are represented inside NATS (D12's second lane). The token store
-// here is the credential store half of D22 — records name an identity and
+// external subjects are represented inside NATS (D12's second lane). The token store
+// here is the credential store half of D22 — records name a principal and
 // carry no policy; policy stays in the registry.
 package callout
 
@@ -19,7 +19,7 @@ import (
 // TokenPrefix marks SoulIdentity-issued API tokens.
 const TokenPrefix = "sit_"
 
-// Record is the token store's whole schema (D22): the declared identity and
+// Record is the token store's whole schema (D22): the declared principal and
 // bookkeeping — deliberately no permission, persona, or role field. Its
 // appearance would fire D22's reversal condition.
 type Record struct {
@@ -64,7 +64,7 @@ func NewToken() (token, digest string, err error) {
 }
 
 // Validate resolves a presented token against the store: digest lookup plus
-// the record's own expiry. It returns the declared identity — authorization
+// the record's own expiry. It returns the declared principal — authorization
 // against the registry is the caller's next step (D22 keeps the stages
 // separate).
 func Validate(s Store, token string) (Record, error) {

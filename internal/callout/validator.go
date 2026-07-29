@@ -31,12 +31,12 @@ const (
 type ExternalSubject struct {
 	Lane Lane
 
-	// Token lane: the registry identity the record names.
+	// Token lane: the principal the token record names.
 	Account string
 	User    string
 	Label   string
 
-	// OIDC lane: the validated external identity.
+	// OIDC lane: the validated external subject.
 	OID     string
 	Display string // preferred_username — audit legibility only, never keyed
 	Issuer  string
@@ -100,7 +100,7 @@ func NewOIDCValidator(ctx context.Context, issuer, audience string) (*OIDCValida
 
 // Validate verifies signature, issuer, audience, and validity window, then
 // extracts the claims the authorize stage needs. The stable oid keys the
-// identity; preferred_username is carried for the audit only.
+// subject; preferred_username is carried for the audit only.
 func (o *OIDCValidator) Validate(credential string) (ExternalSubject, error) {
 	tok, err := o.verifier.Verify(context.Background(), credential)
 	if err != nil {

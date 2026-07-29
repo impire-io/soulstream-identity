@@ -6,6 +6,12 @@ gate.*
 
 ## Where we are (2026-07-29)
 
+**One noun: persona — D27**
+([journey 0016](../04-JOURNEY/0016-one-noun-persona.md), constitution
+1.3.1): persona == identity, adopted from soulstream's fixed terminology;
+*principal* is the server-proven (account, user); "identity" survives
+only in the product name. A vocabulary pass — no wire change.
+
 **The vault is the directory — D26, ephemeral users**
 ([journey 0015](../04-JOURNEY/0015-the-vault-is-the-directory.md), D26 in
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)): 0014's

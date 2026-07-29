@@ -1,4 +1,4 @@
-// The NATS KV backend of the token store: digest keys, identity-only values
+// The NATS KV backend of the token store: digest keys, principal-only values
 // (D22) — plaintext tokens never reach this bucket.
 
 package callout

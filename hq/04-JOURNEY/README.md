@@ -17,6 +17,16 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-29)
 
+**One noun: persona** ([episode 0016](0016-one-noun-persona.md); D27 in
+[`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), constitution 1.3.1):
+persona == identity — the ecosystem's one noun for the represented
+subject, adopted from soulstream's fixed terminology; *principal* is the
+server-proven (account, user) a connection speaks as (D15's term), and
+"identity" survives only in the product name. The persona is born at
+first encounter (D26); the vault is where its durable artifacts live. A
+vocabulary pass over vision, constitution, missions, and load-bearing
+comments — no type, op, or JSON field changed [measured: gate green].
+
 **The vault is the directory — ephemeral users, keys on first touch**
 ([episode 0015](0015-the-vault-is-the-directory.md); D26 in
 [`../02-DESIGN/nats-surface.md`](../02-DESIGN/nats-surface.md)): episode
@@ -194,3 +204,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0013 | [The registry dissolves: authorization in the ACLs and the bindings](0013-the-registry-dissolves.md) |
 | 0014 | [The cross-service proof: the seam carries a real record](0014-the-cross-service-proof.md) |
 | 0015 | [The vault is the directory: ephemeral users, keys on first touch](0015-the-vault-is-the-directory.md) |
+| 0016 | [One noun: persona](0016-one-noun-persona.md) |

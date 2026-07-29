@@ -182,9 +182,9 @@ func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (
 		i.log.Warn("callout REFUSED", "err", err.Error(),
 			"account", sub.Account, "user", sub.User, "label", sub.Label,
 			"client_host", req.ClientInformation.Host)
-		return "", errors.New("identity not authorized")
+		return "", errors.New("not authorized")
 	}
-	// The attribution the M4 gate requires: external identity, label, host.
+	// The attribution the M4 gate requires: external subject, label, host.
 	i.log.Info("callout ADMITTED", "account", sub.Account, "user", sub.User,
 		"label", sub.Label, "client_host", req.ClientInformation.Host,
 		"user_nkey", req.UserNkey, "ttl", i.ttl.String())
@@ -212,14 +212,14 @@ func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (s
 		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
 			"issuer", sub.Issuer, "subject", sub.OID,
 			"client_host", req.ClientInformation.Host)
-		return "", errors.New("identity not authorized")
+		return "", errors.New("not authorized")
 	}
 	userJWT, err := mint.ForTeam(i.vault, team, sub.OID, req.UserNkey, i.ttl)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
 			"issuer", sub.Issuer, "subject", sub.OID, "team", team,
 			"client_host", req.ClientInformation.Host)
-		return "", errors.New("identity not authorized")
+		return "", errors.New("not authorized")
 	}
 	display := sub.Display
 	if display == "" {

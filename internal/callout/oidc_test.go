@@ -186,7 +186,7 @@ func TestOIDCRefusalMatrix(t *testing.T) {
 			t.Fatalf("%s: admitted", row.name)
 		}
 		// Generic on the wire (D20): never the specific reason.
-		if resp.Error != "credential rejected" && resp.Error != "identity not authorized" {
+		if resp.Error != "credential rejected" && resp.Error != "not authorized" {
 			t.Fatalf("%s: wire error leaks the reason: %q", row.name, resp.Error)
 		}
 		if !strings.Contains(audit.String(), row.reason) {

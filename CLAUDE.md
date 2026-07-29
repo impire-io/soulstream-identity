@@ -1,20 +1,23 @@
 # SoulIdentity — project instructions
 
-The identity plane of the Soulstream ecosystem: the representation of
-identity for humans and agents — identity vault, signing oracle, NATS
-credential minting — as a NATS-only service with xkey-sealed E2E
-request/reply on the caller's own subject prefix (server-enforced principal,
-D15). Connections are creds-file bypass or auth callout — SoulIdentity is
-the callout issuer (API tokens first, D19–D22); the vault rides NATS KV,
-sealed to a deployment-supplied first key.
+The identity plane of the Soulstream ecosystem: the home of the persona —
+the ecosystem's one noun for a represented subject, human or agent (D27) —
+its vault-held keys materializing on first touch (D26), signing oracle,
+NATS credential minting — as a NATS-only service with xkey-sealed E2E
+request/reply on the caller's own subject prefix (server-enforced
+principal, D15). Identity truth lives in the deployment's IAM; personas
+are ephemeral, and no per-persona registry exists anywhere (D25).
+Connections are creds-file bypass or auth callout — SoulIdentity is the
+callout issuer (API tokens + Entra/OIDC, D19–D24); the vault rides NATS
+KV, sealed to a deployment-supplied first key.
 Module `github.com/impire-io/soulidentity`, Go 1.26.
 
 **How this project is run lives in `hq/` — read [`AGENTS.md`](AGENTS.md)
 first** (orientation order + the non-negotiables), then hold decisions against
 `hq/00-GENESIS/`. Where things stand: `hq/04-JOURNEY/README.md`. The plan:
 `hq/03-IMPLEMENTATION/ROADMAP.md`. The design with its D-numbered decisions
-(cited from code comments): `hq/02-DESIGN/` (D1–D13 in `agent.md`, D14–D18
-and D25 in `nats-surface.md`, D19–D24 in `auth-callout.md`).
+(cited from code comments): `hq/02-DESIGN/` (D1–D13 and D27 in `agent.md`,
+D14–D18 and D25–D26 in `nats-surface.md`, D19–D24 in `auth-callout.md`).
 
 Conventions:
 

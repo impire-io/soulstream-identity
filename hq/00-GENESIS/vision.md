@@ -5,29 +5,40 @@ mission moved from "a local ssh-agent for personas" to the identity plane
 below — NATS-only, no socket. The custody property is unchanged; what changed
 is what the project is for and where it lives.*
 
+*Refreshed 2026-07-29 (journeys 0013–0016, D25–D27): the ecosystem speaks
+**one noun — persona** — for the represented subject, human or agent alike
+(soulstream fixed the term; we adopt it). The server-proven (account, user)
+a connection speaks as is the **principal** (D15's word), never a second
+identity concept. Identity truth lives in the deployment's IAM; personas
+are ephemeral — born at first encounter, their durable artifacts
+materializing in the vault on first touch — and there is no registry of
+them anywhere: the vault that custodies their keys is the directory.*
+
 ## What SoulIdentity is
 
-SoulIdentity is **the identity plane of the Soulstream ecosystem**: the
-representation of identity for humans and agents alike. It is a **service on
-NATS** — consumers reach it over end-to-end encrypted request/reply, xkeys
-sealing every payload and the caller's own NATS identity authenticating every
-request — that holds the account signing keys and answers **sign and mint
-requests instead of handing out keys**. Consumers name the identity they act
-for and receive signatures and minted credentials; the seeds never cross the
-API.
+SoulIdentity is **the identity plane of the Soulstream ecosystem**: the home
+of the persona — human or agent, one noun, equally first-class. It is a
+**service on NATS** — consumers reach it over end-to-end encrypted
+request/reply, xkeys sealing every payload and the caller's own NATS
+principal authenticating every request — that holds the personas' keys and
+answers **sign and mint requests instead of handing out keys**. Consumers
+name the persona they act for and receive signatures and minted
+credentials; the seeds never cross the API.
 
-Its central job is representation. An identity that exists outside NATS — an
-Entra or OIDC principal, an API token, an agent operated on someone's behalf —
-is given a real NATS identity with the right permissions, minted from the
-account signing keys in the vault. Acting *as* someone is a first-class,
-audited operation: the registry says who may be represented by whom, and every
-mint and signature is attributable and logged. The NATS server remains the
-verifier of record for everything a minted credential claims.
+Its central job is representation. A subject that exists outside NATS — an
+Entra or OIDC subject, an API token, an agent operated on someone's behalf —
+is given a real NATS principal with the right permissions, minted from the
+account signing keys in the vault; its persona's durable artifacts (the
+signing key today, the sealing key when sealed topics land) materialize in
+the vault the first time they are needed, owner-bound, with no per-persona
+provisioning act anywhere (D26). Every mint and signature is attributable
+and logged against the server-proven principal. The NATS server remains
+the verifier of record for everything a minted credential claims.
 
 Not every connection goes through it. A client that presents its own creds
 file in its connection options connects to NATS directly — the self-custody
 bypass for operators — and SoulIdentity is simply not in that path.
-Representation is for identities that do not carry NATS credentials of their
+Representation is for subjects that do not carry NATS credentials of their
 own; auth-callout configuration is where that line is drawn.
 
 The custody analogy survives from genesis: like an ssh-agent, SoulIdentity
@@ -44,10 +55,12 @@ soulidentity is exactly:
    rest — **NATS KV with xkey envelope encryption is the initial backend**
    (the milestone-1 file keystore is transitional; the unwrapping xkey and
    the service's own creds are the only local secrets).
-2. A policy surface: who may act as which persona, which role mints — fed by
-   two sources: the **declared registry**, or **validated claims** carried by
-   the connection credential (a JWT in the token option). Declared or
-   verifiably claimed, never guessed.
+2. A policy surface: the **declared bindings** (D25) — a persona key
+   carries its owner principal, a team key the account it signs for — plus
+   the **token records** and **validated claims** carried by the connection
+   credential. Declared or verifiably claimed, never guessed; op-level
+   reach is the transport ACL's, and no separate ledger restates what the
+   bindings already say.
 3. A service surface answering sign and mint requests — **on NATS, with
    xkey-sealed payloads, and nothing else: there is no socket**. The
    pre-NATS moment is answered by the connection ladder, not a local
@@ -65,13 +78,13 @@ or it goes nowhere.
 ## Who it is for
 
 Humans and agents that need to *be someone* inside NATS: operators of
-Soulstream realms and personas, teams whose AI clients arrive through a shared
-node, and outside-world identities — Entra, OIDC, API tokens — that must be
-represented inside the system with the right identity and permissions. The
-connection ladder is two rungs wide: bring your own creds file (self-custody
-— operators, the laptop case, break-glass) or bring an external token and be
-represented through auth callout. One policy surface serves both; nobody who
-already owns their identity is forced through SoulIdentity.
+Soulstream realms, teams whose AI clients arrive through a shared node, and
+outside-world subjects — Entra, OIDC, API tokens — whose personas must be
+represented inside the system with the right permissions. The connection
+ladder is two rungs wide: bring your own creds file (self-custody —
+operators, the laptop case, break-glass) or bring an external token and be
+represented through auth callout. One policy surface serves both; nobody
+who already owns their credentials is forced through SoulIdentity.
 
 ## Where it is pointed
 
@@ -103,10 +116,11 @@ sequencing in
   permissions via scoped signing keys and callout JWTs. A policy store
   consulted *instead of* the server is a second source of truth; ours is only
   ever the backend of what the server enforces.
-- **An identity provider.** We *represent* external identities inside NATS;
-  we never become the thing that authenticates them. Authentication backends
-  (Entra/OIDC, LDAP, a KV of API tokens) plug into callout mode; we implement
-  none of them ourselves.
+- **An identity provider.** We *represent* external subjects inside NATS;
+  we never become the thing that authenticates them, and identity truth —
+  who exists, who belongs — stays in the deployment's IAM. Authentication
+  backends (Entra/OIDC, LDAP, a KV of API tokens) plug into callout mode;
+  we implement none of them ourselves.
 - **A required component for local sessions.** Soulstream works without
   SoulIdentity — a creds file in hand connects directly (the bypass is
   first-class, not a workaround), and local sessions with local key files

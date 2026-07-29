@@ -201,7 +201,7 @@ type signRecordRequest struct {
 type signRecordResponse struct {
 	Sig string `json:"sig"` // the base64 string Soulstream-Sig carries
 	// PublicKey is the signing persona's public key (base64 raw Ed25519) —
-	// the identity the signature verifies against, returned so a consumer's
+	// the persona the signature verifies against, returned so a consumer's
 	// Signer needs no second op after signing.
 	PublicKey string `json:"public_key"`
 }

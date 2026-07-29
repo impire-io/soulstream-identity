@@ -26,7 +26,7 @@ const (
 	// KindNATSAccountSigningKey is an account (signing) nkey seed ("SA…"): mints
 	// user JWTs. Scoped signing keys are the recommended shape (hq/02-DESIGN/agent.md D5).
 	KindNATSAccountSigningKey Kind = "nats-account-signing-key"
-	// KindNATSUserKey is a user nkey seed ("SU…"): the minted identities' keys.
+	// KindNATSUserKey is a user nkey seed ("SU…"): the minted principals' keys.
 	KindNATSUserKey Kind = "nats-user-key"
 	// KindPersonaSigningKey is a Soulstream persona's Ed25519 seed (base64,
 	// 32 bytes — the `soulstream key init` file format): signs canonical records.
@@ -35,9 +35,9 @@ const (
 
 // Entry is a vault key as the API shows it: never the secret. The binding
 // fields are the authorization source (hq/02-DESIGN/nats-surface.md D25):
-// for an account signing key, Account is the account identity it signs for —
+// for an account signing key, Account is the account it signs for —
 // the team object's binding (hq/02-DESIGN/auth-callout.md D24); for a
-// persona signing key, (Account, User) is the owner identity that may sign
+// persona signing key, (Account, User) is the owner principal that may sign
 // with it (hq/02-DESIGN/agent.md D6 as amended); both empty for user keys.
 type Entry struct {
 	Name      string `json:"name"`
@@ -67,7 +67,7 @@ type Store interface {
 
 // stored is the record shape sealed into the backend. Secret is the seed in
 // its kind's native encoding. Account binds an account signing key to the
-// account identity it signs for (D24); (Account, User) binds a persona
+// account it signs for (D24); (Account, User) binds a persona
 // signing key to its owner (D6 as amended, D25); both empty for user keys.
 type stored struct {
 	Kind      Kind   `json:"kind"`
@@ -178,7 +178,7 @@ func derive(kind Kind, secret string) (string, error) {
 // Import stores a secret under name. Existing names are refused, never
 // overwritten — a changed key is indistinguishable from a substitution.
 // The binding completes the key (D25): an account signing key requires
-// account — the identity it signs for (the key name is the team name,
+// account — the account it signs for (the key name is the team name,
 // D24); a persona signing key requires (account, user) — the owner that
 // may sign with it (D6 as amended); a user key refuses both.
 func (v *Vault) Import(name string, kind Kind, secret, account, user string) (Entry, error) {

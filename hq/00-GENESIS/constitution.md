@@ -34,11 +34,12 @@ The NATS server enforces; SoulIdentity decides only what is genuinely its own.
   of the subject, D25). SoulIdentity MUST NOT build a parallel enforcement
   path that duplicates what the server already checks.
 - SoulIdentity's own policy surface is exactly the declared bindings (D25):
-  which account a team key signs for (D24), which identity owns a persona
-  key (D6 as amended) — and, for external credentials, the token record
-  naming the identity (D22) or the validated claim naming the team
-  (D23/D24). Signing policy is the binding; who exists is what the bindings
-  and records state; pub/sub permissions are not ours.
+  which account a team key signs for (D24), which principal owns a persona
+  key (D6 as amended, materialized on first touch — D26) — and, for
+  external credentials, the token record naming the principal (D22) or the
+  validated claim naming the team (D23/D24). Signing policy is the
+  binding; who exists is the IAM's truth; pub/sub permissions are not
+  ours.
 - Validations the server will repeat (e.g. signing-key ↔ account binding) are
   diagnostics — warn-level conveniences, never gates. A mis-bound key fails
   closed at the server; that is the design, not a gap.
@@ -147,9 +148,15 @@ change, a scope call, or a public claim.
   principle; MINOR — a new principle or section, or materially expanded
   guidance; PATCH — clarifications.
 
-**Version**: 1.3.0 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-29
+**Version**: 1.3.1 | **Ratified**: 2026-07-28 | **Last Amended**: 2026-07-29
 
 *Amendment history:*
+- *1.3.1 (2026-07-29)* — one noun (journey
+  [0016](../04-JOURNEY/0016-one-noun-persona.md), D26–D27): terminology
+  fixed — **persona** is the represented subject (soulstream's noun,
+  adopted), **principal** the server-proven (account, user); Principle II's
+  policy bullet restated in those words, with persona keys materializing
+  on first touch (D26) and identity truth named as the IAM's (PATCH).
 - *1.3.0 (2026-07-29)* — the registry dissolves (journey
   [0013](../04-JOURNEY/0013-the-registry-dissolves.md), D25): Principle II's
   policy-surface bullet is restated as the declared bindings — team keys
