@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,11 +31,11 @@
 
 ## Notes
 
-- Three [NEEDS CLARIFICATION] markers remain, by design routed to
-  `/speckit-clarify` (the maintainer asked to talk the authorization shape
-  through before planning): FR-013 (delegated vs app-only tokens), FR-014
-  (revocation bound: accept vs maximum-token-age knob), FR-015 (role catalog
-  declaration: start-time configuration vs admin-gated runtime surface ops).
-  All other items pass. Resolve the three markers before `/speckit-plan`.
+- All three [NEEDS CLARIFICATION] markers were resolved in the 2026-07-29
+  clarification session (see spec `## Clarifications`): FR-013 both token
+  classes admitted; FR-014 revocation bound accepted as stated, no knob;
+  FR-015 dissolved — there is no mapping catalog, the role value IS the team
+  name and resolves against the declared teams. The custody question
+  dissolved with it: a role value naming no declared team is inert.
 - Domain terms of the external provider (access token, role claim, `oid`)
   are retained where no plainer word exists; each is explained in place.
