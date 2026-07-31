@@ -342,6 +342,30 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 	return out, err
 }
 
+// MintEphemeral issues an ephemeral scoped user JWT signed by the named
+// team's signing key (role selection by declared configuration,
+// hq/02-DESIGN/agent.md D28). The caller generates its user keypair locally
+// and sends only the public half; no seed exists on either side of the wire
+// and the response is the JWT alone. Tags ride into the user claims for the
+// account's scoped-signer templates to resolve (NATS tag semantics:
+// lowercased, trimmed, deduplicated); they are inert without such a
+// template. ttl bounds the credential — the revocation propagation bound
+// (D22).
+func (c *Client) MintEphemeral(team, user, userPublicKey string, ttl time.Duration, tags []string) (string, error) {
+	body := map[string]any{
+		"team": team, "user": user, "user_public_key": userPublicKey,
+		"ttl_seconds": int64(ttl / time.Second),
+	}
+	if len(tags) > 0 {
+		body["tags"] = tags
+	}
+	var out struct {
+		JWT string `json:"jwt"`
+	}
+	err := c.call("mint.ephemeral", body, &out)
+	return out.JWT, err
+}
+
 // UserKeyName is the vault name of a principal's minted user key.
 func UserKeyName(account, user string) string {
 	return "user/" + account + "/" + user

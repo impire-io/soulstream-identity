@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
@@ -220,6 +221,21 @@ type mintResponse struct {
 	Creds string `json:"creds,omitempty"`
 }
 
+type mintEphemeralRequest struct {
+	Team          string   `json:"team"`
+	User          string   `json:"user"`
+	UserPublicKey string   `json:"user_public_key"`
+	TTLSeconds    int64    `json:"ttl_seconds"`
+	Tags          []string `json:"tags,omitempty"`
+}
+
+// mintEphemeralResponse is the JWT and nothing else: the user key is the
+// caller's own, so no seed exists on either side of the wire — the custody
+// line holds by construction (constitution I, D28).
+type mintEphemeralResponse struct {
+	JWT string `json:"jwt"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -357,6 +373,26 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		s.allow(account, user, op, "target_account", req.Account, "target_user", req.User,
 			"user_key", res.UserPublicKey)
 		return resp, nil
+
+	case "mint.ephemeral":
+		var req mintEphemeralRequest
+		if err := unmarshalStrict(body, &req); err != nil {
+			return nil, err
+		}
+		// Attribution is the surface's promise: a mint names its user.
+		if req.User == "" {
+			return nil, errors.New("service: an ephemeral mint names its user")
+		}
+		token, boundAccount, err := mint.ForTeam(s.vault, req.Team, req.User,
+			req.UserPublicKey, time.Duration(req.TTLSeconds)*time.Second, req.Tags)
+		if err != nil {
+			return nil, err
+		}
+		s.allow(account, user, op, "team", req.Team,
+			"target_account", boundAccount, "target_user", req.User,
+			"user_key", req.UserPublicKey, "ttl_seconds", req.TTLSeconds,
+			"tags", strings.Join(req.Tags, ","))
+		return mintEphemeralResponse{JWT: token}, nil
 
 	case "tokens.create", "tokens.list", "tokens.revoke", "sentinel.mint":
 		return s.dispatchCallout(account, user, op, body)

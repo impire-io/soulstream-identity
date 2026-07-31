@@ -214,7 +214,7 @@ func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (s
 			"client_host", req.ClientInformation.Host)
 		return "", errors.New("not authorized")
 	}
-	userJWT, err := mint.ForTeam(i.vault, team, sub.OID, req.UserNkey, i.ttl)
+	userJWT, _, err := mint.ForTeam(i.vault, team, sub.OID, req.UserNkey, i.ttl, nil)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
 			"issuer", sub.Issuer, "subject", sub.OID, "team", team,

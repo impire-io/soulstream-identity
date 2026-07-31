@@ -7,6 +7,7 @@ package mint
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
@@ -80,35 +81,48 @@ func ForKey(v *vault.Vault, account, user, userPub string, ttl time.Duration) (s
 	if err != nil {
 		return "", err
 	}
-	return ephemeral(kp, account, user, userPub, ttl)
+	return ephemeral(kp, account, user, userPub, ttl, nil)
 }
 
-// ForTeam issues an ephemeral scoped user JWT for the claims-derived lane
-// (D24): the team name resolves directly to its vault signing key and the
-// account binding recorded at import — no registry row, no mapping store.
-// subject names the external subject (the stable oid, D27) for attribution.
-func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration) (string, error) {
+// ForTeam issues an ephemeral scoped user JWT for a named team — role
+// selection by declared configuration (D28): the team name resolves directly
+// to its vault signing key and the account binding recorded at import — no
+// registry row, no mapping store. The claims-derived callout lane (D24) and
+// the mint.ephemeral op both end here; only the by-name paths reach a
+// multi-team account, the binding-resolved paths keep refusing it as
+// ambiguous (D5 as amended). subject names the minted user (the stable oid
+// on the claims lane, D27) and tags ride into the user claims for the
+// scoped template to resolve. Returns the bound account beside the token so
+// the caller can attribute the mint in full.
+func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration, tags []string) (string, string, error) {
 	e, err := v.Get(team)
 	if err != nil {
-		return "", fmt.Errorf("mint: no declared team %q: %w", team, err)
+		return "", "", fmt.Errorf("mint: no declared team %q: %w", team, err)
 	}
 	if e.Kind != vault.KindNATSAccountSigningKey {
-		return "", fmt.Errorf("mint: team %q is %q, want %q", team, e.Kind, vault.KindNATSAccountSigningKey)
+		return "", "", fmt.Errorf("mint: team %q is %q, want %q", team, e.Kind, vault.KindNATSAccountSigningKey)
 	}
 	if e.Account == "" {
-		return "", fmt.Errorf("mint: team %q has no account binding — reimport it with its account", team)
+		return "", "", fmt.Errorf("mint: team %q has no account binding — reimport it with its account", team)
 	}
 	kp, err := v.KeyPair(team)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return ephemeral(kp, e.Account, subject, userPub, ttl)
+	token, err := ephemeral(kp, e.Account, subject, userPub, ttl, tags)
+	if err != nil {
+		return "", "", err
+	}
+	return token, e.Account, nil
 }
 
 // ephemeral is the shared mint tail (D20): scoped, permission-less,
-// TTL-bounded claims for the server-assigned key, signed by the resolved
-// signing key. Both authorize sources (registry row, declared team) end here.
-func ephemeral(kp nkeys.KeyPair, account, name, userPub string, ttl time.Duration) (string, error) {
+// TTL-bounded claims for the caller-provided key, signed by the resolved
+// signing key. Both authorize sources (account binding, declared team) end
+// here. Tags are inert on their own — only a scoped template that derives
+// subjects from them gives them meaning (D28) — and follow NATS tag
+// semantics on encode (lowercased, trimmed, deduplicated).
+func ephemeral(kp nkeys.KeyPair, account, name, userPub string, ttl time.Duration, tags []string) (string, error) {
 	if !nkeys.IsValidPublicUserKey(userPub) {
 		return "", fmt.Errorf("mint: %q is not a user public key", userPub)
 	}
@@ -117,6 +131,12 @@ func ephemeral(kp nkeys.KeyPair, account, name, userPub string, ttl time.Duratio
 	}
 	uc := claims(userPub, account, name)
 	uc.Expires = time.Now().Add(ttl).Unix()
+	for _, tag := range tags {
+		if strings.TrimSpace(tag) == "" {
+			return "", errors.New("mint: a tag must be non-empty")
+		}
+	}
+	uc.Tags.Add(tags...)
 	token, err := uc.Encode(kp)
 	if err != nil {
 		return "", fmt.Errorf("mint: encode ephemeral JWT for %s/%s: %w", account, name, err)

@@ -42,6 +42,8 @@ Usage:
                             [--account A] [--user U]   the binding (team / persona owner, D24/D25)
   soulidentity key ls       [conn] --as A/U
   soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
+                            | --team T --user-key U... --ttl DUR [--user U] [--tag k:v]...
+                              ephemeral, team by name (D28): your key, JWT only
   soulidentity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
   soulidentity token ls     [conn] --as A/U
   soulidentity token revoke [conn] --as A/U --digest D
@@ -534,6 +536,16 @@ func cmdKey(args []string, out io.Writer) error {
 	}
 }
 
+// tagsFlag collects repeatable --tag values.
+type tagsFlag []string
+
+func (t *tagsFlag) String() string { return strings.Join(*t, ",") }
+
+func (t *tagsFlag) Set(v string) error {
+	*t = append(*t, v)
+	return nil
+}
+
 func cmdMint(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("mint", flag.ContinueOnError)
 	cf := addConnFlags(fs)
@@ -541,6 +553,11 @@ func cmdMint(args []string, out io.Writer) error {
 	account := fs.String("account", "", "target account public key (default: the principal's)")
 	user := fs.String("user", "", "target user (default: the principal)")
 	creds := fs.Bool("creds", false, "ALSO print a creds file — the seed leaves the vault (custody escape)")
+	team := fs.String("team", "", "mint EPHEMERAL against this declared team by name (D28) — needs --user-key and --ttl")
+	userKey := fs.String("user-key", "", "the caller-generated user PUBLIC key (U…) the ephemeral JWT is for")
+	ttl := fs.Duration("ttl", 0, "ephemeral JWT lifetime — the revocation propagation bound (D22)")
+	var tags tagsFlag
+	fs.Var(&tags, "tag", "tag stamped into the ephemeral user claims (repeatable), e.g. topic:planning-x7")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -549,6 +566,27 @@ func cmdMint(args []string, out io.Writer) error {
 		return err
 	}
 	defer done()
+	if *team != "" {
+		if *account != "" || *creds {
+			return fmt.Errorf("mint --team is the ephemeral lane: no --account, and no creds escape exists (the user key is yours, not the vault's)")
+		}
+		_, tUser, err := parseAs(*as)
+		if err != nil {
+			return err
+		}
+		if *user != "" {
+			tUser = *user
+		}
+		token, err := c.MintEphemeral(*team, tUser, *userKey, *ttl, tags)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s\n", token)
+		return nil
+	}
+	if *userKey != "" || *ttl != 0 || len(tags) > 0 {
+		return fmt.Errorf("--user-key, --ttl and --tag belong to the ephemeral lane: name its team with --team")
+	}
 	tAccount, tUser, err := parseAs(*as)
 	if err != nil {
 		return err

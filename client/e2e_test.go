@@ -52,7 +52,10 @@ const (
 //     never reaches the service;
 //  5. a represented user publishing a management op on its OWN prefix is
 //     refused by the server and never reaches the service — the D25 op-tail
-//     gate, zero service decisions.
+//     gate, zero service decisions;
+//  6. an ephemeral by-name mint (D28) for a caller-held key admits to the
+//     realm with the template's scope, and a second team on the account
+//     leaves by-name minting reachable where the binding path refuses.
 func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	// --- The realm: operator, SYS, one account with JetStream and a scoped
 	// signing key template that pins users to their own prefix and to the
@@ -350,6 +353,74 @@ jetstream { store_dir: %q }
 	}
 	if diff := strings.TrimPrefix(audit.String(), auditBefore); strings.Contains(diff, "keys.list") {
 		t.Fatalf("the op-tail-refused request reached the service: %s", diff)
+	}
+
+	// --- Proof 6 [measured]: the ephemeral by-name mint (D28). The caller
+	// generates its keypair locally and sends only the public half; the
+	// response is a scoped, tagged, TTL-bounded JWT — and nothing else.
+	proberKP, _ := nkeys.CreateUser()
+	proberPub, _ := proberKP.PublicKey()
+	ephJWT, err := admin.MintEphemeral("acme", "prober", proberPub, time.Minute,
+		[]string{"topic:planning-x7", "persona:prober"})
+	if err != nil {
+		t.Fatalf("mint.ephemeral: %v", err)
+	}
+	ephClaims, err := jwt.DecodeUserClaims(ephJWT)
+	if err != nil {
+		t.Fatalf("ephemeral JWT does not decode: %v", err)
+	}
+	if ephClaims.Subject != proberPub || ephClaims.Issuer != askPub || ephClaims.IssuerAccount != accPub {
+		t.Fatalf("ephemeral claims wrong: subject %q issuer %q account %q",
+			ephClaims.Subject, ephClaims.Issuer, ephClaims.IssuerAccount)
+	}
+	if !ephClaims.HasEmptyPermissions() {
+		t.Fatal("ephemeral JWT carries its own permissions — the scope must be the whole policy")
+	}
+	if !ephClaims.Tags.Contains("topic:planning-x7") || !ephClaims.Tags.Contains("persona:prober") {
+		t.Fatalf("tags missing from ephemeral claims: %v", ephClaims.Tags)
+	}
+	if ephClaims.Expires == 0 {
+		t.Fatal("ephemeral JWT carries no expiry")
+	}
+	// The caller-held seed plus the minted JWT admit to the realm; the scope
+	// template expands server-side, exactly as for a durable mint.
+	proberSeed, _ := proberKP.Seed()
+	proberCredsBytes, err := jwt.FormatUserConfig(ephJWT, proberSeed)
+	if err != nil {
+		t.Fatalf("render prober creds: %v", err)
+	}
+	proberCreds := filepath.Join(t.TempDir(), "prober.creds")
+	if err := os.WriteFile(proberCreds, proberCredsBytes, 0o600); err != nil {
+		t.Fatalf("write prober creds: %v", err)
+	}
+	ncProber, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(proberCreds))
+	if err != nil {
+		t.Fatalf("ephemeral by-name mint did not admit: %v", err)
+	}
+	ncProber.Close()
+	// A second team bound to the same account: the binding-resolved durable
+	// mint refuses as ambiguous, by-name minting reaches the new role — the
+	// D5 amendment's reversal condition, answered (D28).
+	ask2KP, _ := nkeys.CreateAccount()
+	ask2Pub, _ := ask2KP.PublicKey()
+	ask2Seed, _ := ask2KP.Seed()
+	if _, err := admin.ImportKey("acme-tool", client.KindNATSAccountSigningKey, string(ask2Seed), accPub, ""); err != nil {
+		t.Fatalf("import second team: %v", err)
+	}
+	if _, err := admin.Mint(accPub, "daan"); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("binding path must refuse a multi-team account as ambiguous, got %v", err)
+	}
+	toolJWT, err := admin.MintEphemeral("acme-tool", "prober", proberPub, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("mint.ephemeral for the second role: %v", err)
+	}
+	toolClaims, err := jwt.DecodeUserClaims(toolJWT)
+	if err != nil {
+		t.Fatalf("second-role JWT does not decode: %v", err)
+	}
+	if toolClaims.Issuer != ask2Pub {
+		t.Fatalf("second-role issuer %q is not its team's key %q", toolClaims.Issuer, ask2Pub)
 	}
 
 	// --- Proof 3 [measured]: the vault's stream holds ciphertext only at

@@ -281,6 +281,88 @@ func TestMintResolvesByBinding(t *testing.T) {
 	}
 }
 
+func TestMintEphemeralSelectsTeamByName(t *testing.T) {
+	s, _, acc := harness(t)
+	askKP, _ := nkeys.CreateAccount()
+	askSeed, _ := askKP.Seed()
+	var team vault.Entry
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "soulrealm-agent", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(askSeed), Account: acc,
+	}, &team); err != nil {
+		t.Fatalf("import signing key: %v", err)
+	}
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+
+	var res mintEphemeralResponse
+	if err := call(t, s, acc, "ops", "mint.ephemeral", mintEphemeralRequest{
+		Team: "soulrealm-agent", User: "prober", UserPublicKey: upub,
+		TTLSeconds: 60, Tags: []string{"topic:planning-x7", "persona:prober"},
+	}, &res); err != nil {
+		t.Fatalf("mint.ephemeral: %v", err)
+	}
+	uc, err := jwt.DecodeUserClaims(res.JWT)
+	if err != nil {
+		t.Fatalf("ephemeral JWT does not decode: %v", err)
+	}
+	if uc.Subject != upub {
+		t.Fatalf("subject %q is not the caller's key %q", uc.Subject, upub)
+	}
+	if uc.Issuer != team.PublicKey || uc.IssuerAccount != acc {
+		t.Fatalf("issuer chain wrong: %q / %q", uc.Issuer, uc.IssuerAccount)
+	}
+	if !uc.HasEmptyPermissions() {
+		t.Fatal("ephemeral JWT carries its own permissions — the scope must be the whole policy")
+	}
+	if uc.Expires == 0 {
+		t.Fatal("ephemeral JWT carries no expiry")
+	}
+	if !uc.Tags.Contains("topic:planning-x7") || !uc.Tags.Contains("persona:prober") {
+		t.Fatalf("tags missing from claims: %v", uc.Tags)
+	}
+
+	// The response is the JWT alone — no key material rides back (D28,
+	// constitution I): the wire struct has no other field to leak into.
+
+	// A mint without its user refuses: attribution is the surface's promise.
+	if err := call(t, s, acc, "ops", "mint.ephemeral", mintEphemeralRequest{
+		Team: "soulrealm-agent", UserPublicKey: upub, TTLSeconds: 60,
+	}, nil); err == nil || !strings.Contains(err.Error(), "names its user") {
+		t.Fatalf("user-less mint must refuse, got %v", err)
+	}
+	if err := call(t, s, acc, "ops", "mint.ephemeral", mintEphemeralRequest{
+		Team: "nobody", User: "prober", UserPublicKey: upub, TTLSeconds: 60,
+	}, nil); err == nil {
+		t.Fatal("unknown team accepted")
+	}
+	if err := call(t, s, acc, "ops", "mint.ephemeral", mintEphemeralRequest{
+		Team: "soulrealm-agent", User: "prober", UserPublicKey: upub,
+	}, nil); err == nil {
+		t.Fatal("zero ttl accepted — an unbounded ephemeral credential")
+	}
+
+	// The D28 collision, driven through the ops: a second team on the same
+	// account makes the binding-resolved durable mint refuse as ambiguous,
+	// while by-name ephemeral minting reaches both roles.
+	ask2KP, _ := nkeys.CreateAccount()
+	ask2Seed, _ := ask2KP.Seed()
+	if err := call(t, s, acc, "ops", "keys.import", importKeyRequest{
+		Name: "soulrealm-tool", Kind: string(vault.KindNATSAccountSigningKey), Secret: string(ask2Seed), Account: acc,
+	}, nil); err != nil {
+		t.Fatalf("import second team: %v", err)
+	}
+	if err := call(t, s, acc, "ops", "mint",
+		mintRequest{Account: acc, User: "daan"}, nil); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("binding path must refuse a multi-team account as ambiguous, got %v", err)
+	}
+	if err := call(t, s, acc, "ops", "mint.ephemeral", mintEphemeralRequest{
+		Team: "soulrealm-tool", User: "prober", UserPublicKey: upub, TTLSeconds: 60,
+	}, &res); err != nil {
+		t.Fatalf("mint.ephemeral for the second role: %v", err)
+	}
+}
+
 func TestTokenAndSentinelOps(t *testing.T) {
 	s, _, acc := harness(t)
 	// Without callout configuration the ops refuse.
