@@ -39,11 +39,11 @@ Usage:
   soulidentity keygen                              mint an xkey seed (seed on stdout)
   soulidentity status   [conn]                     probe the service
   soulidentity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
-                            [--account A] [--user U]   the binding (team / persona owner, D24/D25)
+                            [--account A] [--user U]   the binding (role / persona owner, D24/D25)
   soulidentity key ls       [conn] --as A/U
   soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
-                            | --team T --user-key U... --ttl DUR [--user U] [--tag k:v]...
-                              ephemeral, team by name (D28): your key, JWT only
+                            | --role R --user-key U... --ttl DUR [--user U] [--tag k:v]...
+                              ephemeral, role by name (D28): your key, JWT only
   soulidentity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
   soulidentity token ls     [conn] --as A/U
   soulidentity token revoke [conn] --as A/U --digest D
@@ -553,7 +553,7 @@ func cmdMint(args []string, out io.Writer) error {
 	account := fs.String("account", "", "target account public key (default: the principal's)")
 	user := fs.String("user", "", "target user (default: the principal)")
 	creds := fs.Bool("creds", false, "ALSO print a creds file — the seed leaves the vault (custody escape)")
-	team := fs.String("team", "", "mint EPHEMERAL against this declared team by name (D28) — needs --user-key and --ttl")
+	role := fs.String("role", "", "mint EPHEMERAL against this declared role by name (D28) — needs --user-key and --ttl")
 	userKey := fs.String("user-key", "", "the caller-generated user PUBLIC key (U…) the ephemeral JWT is for")
 	ttl := fs.Duration("ttl", 0, "ephemeral JWT lifetime — the revocation propagation bound (D22)")
 	var tags tagsFlag
@@ -566,9 +566,9 @@ func cmdMint(args []string, out io.Writer) error {
 		return err
 	}
 	defer done()
-	if *team != "" {
+	if *role != "" {
 		if *account != "" || *creds {
-			return fmt.Errorf("mint --team is the ephemeral lane: no --account, and no creds escape exists (the user key is yours, not the vault's)")
+			return fmt.Errorf("mint --role is the ephemeral lane: no --account, and no creds escape exists (the user key is yours, not the vault's)")
 		}
 		_, tUser, err := parseAs(*as)
 		if err != nil {
@@ -577,7 +577,7 @@ func cmdMint(args []string, out io.Writer) error {
 		if *user != "" {
 			tUser = *user
 		}
-		token, err := c.MintEphemeral(*team, tUser, *userKey, *ttl, tags)
+		token, err := c.MintEphemeral(*role, tUser, *userKey, *ttl, tags)
 		if err != nil {
 			return err
 		}
@@ -585,7 +585,7 @@ func cmdMint(args []string, out io.Writer) error {
 		return nil
 	}
 	if *userKey != "" || *ttl != 0 || len(tags) > 0 {
-		return fmt.Errorf("--user-key, --ttl and --tag belong to the ephemeral lane: name its team with --team")
+		return fmt.Errorf("--user-key, --ttl and --tag belong to the ephemeral lane: name its role with --role")
 	}
 	tAccount, tUser, err := parseAs(*as)
 	if err != nil {

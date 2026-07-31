@@ -1,6 +1,6 @@
 // Validator: D22's authn-backend seam made concrete (D23). A presented
 // credential proves a subject; authorization stays in the issuer (registry
-// row for the token lane, declared team for the claims lane) and mint is
+// row for the token lane, declared role for the claims lane) and mint is
 // shared. The seam exists because the design names its backends — API
 // tokens and Entra/OIDC — not as a plugin point for later.
 

@@ -61,9 +61,9 @@ func (s *Service) dispatchCallout(account, user, op string, body []byte) (any, e
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		// A token for an account no team is bound to would only ever be
+		// A token for an account no role is bound to would only ever be
 		// refused at callout time; refuse the mistake at issuance (D25).
-		if _, err := s.vault.TeamForAccount(req.Account); err != nil {
+		if _, err := s.vault.RoleForAccount(req.Account); err != nil {
 			return nil, err
 		}
 		if req.User == "" {

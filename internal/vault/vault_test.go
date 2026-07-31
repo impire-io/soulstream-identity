@@ -218,7 +218,7 @@ func TestAccountBindingOnSigningKeys(t *testing.T) {
 	accPub, _ := accKP.PublicKey()
 
 	// An account signing key without its binding is refused (D24: the key
-	// name is the team name; the binding completes the team object).
+	// name is the role name; the binding completes the role object).
 	if _, err := v.Import("engineering", KindNATSAccountSigningKey, string(signSeed), "", ""); err == nil {
 		t.Fatal("an account signing key without its account binding must be refused")
 	}
@@ -305,21 +305,21 @@ func TestGeneratePersonaKeyMaterializesOwnerBound(t *testing.T) {
 	}
 }
 
-func TestTeamForAccountResolvesByBinding(t *testing.T) {
+func TestRoleForAccountResolvesByBinding(t *testing.T) {
 	v, _ := newTestVault(t)
 	accPub := accountPub(t)
 
-	// No team bound: refused.
-	if _, err := v.TeamForAccount(accPub); err == nil {
-		t.Fatal("an account with no bound team must refuse")
+	// No role bound: refused.
+	if _, err := v.RoleForAccount(accPub); err == nil {
+		t.Fatal("an account with no bound role must refuse")
 	}
 
 	signKP, _ := nkeys.CreateAccount()
 	signSeed, _ := signKP.Seed()
 	if _, err := v.Import("engineering", KindNATSAccountSigningKey, string(signSeed), accPub, ""); err != nil {
-		t.Fatalf("import team: %v", err)
+		t.Fatalf("import role: %v", err)
 	}
-	e, err := v.TeamForAccount(accPub)
+	e, err := v.RoleForAccount(accPub)
 	if err != nil || e.Name != "engineering" {
 		t.Fatalf("resolve: %v, %+v", err, e)
 	}
@@ -329,9 +329,9 @@ func TestTeamForAccountResolvesByBinding(t *testing.T) {
 	sign2KP, _ := nkeys.CreateAccount()
 	sign2Seed, _ := sign2KP.Seed()
 	if _, err := v.Import("engineering-2", KindNATSAccountSigningKey, string(sign2Seed), accPub, ""); err != nil {
-		t.Fatalf("import second team: %v", err)
+		t.Fatalf("import second role: %v", err)
 	}
-	if _, err := v.TeamForAccount(accPub); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("two bound teams must refuse as ambiguous, got %v", err)
+	if _, err := v.RoleForAccount(accPub); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("two bound roles must refuse as ambiguous, got %v", err)
 	}
 }

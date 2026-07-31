@@ -17,20 +17,24 @@ because a refuted assumption is as load-bearing as the shipped code.
 
 ## Where things stand (2026-07-31)
 
-**Role selection by declared team name — D28, the first consumer-proven
-M2 addition** ([episode 0017](0017-role-selection-by-team-name.md); D28 in
+**Role selection by declared name — D28, the first consumer-proven
+M2 addition** ([episode 0017](0017-role-selection-by-name.md); D28 in
 [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), answering
 soulidentity#1): soulrealm's fleet needs one scoped signing key per role
 on one realm account — the exact observable D5's amendment reversal
 condition watched. The `mint.ephemeral` op issues an ephemeral scoped
-user JWT against a **named team** for a **caller-supplied public key**
+user JWT against a **named role** for a **caller-supplied public key**
 (no seed in either direction; the response is the JWT alone), with
 **tags** in the user claims for scoped templates to resolve and a
-required TTL (D22's bound). Proven in the M3-gate e2e [measured]: the
-by-name-minted JWT admits to the operator-mode realm; with a second team
-imported the binding path refuses as ambiguous while both roles stay
-reachable by name. Named, not built: the token lane's own named-team
-answer (node enrollment), and per-team tag policy.
+required TTL (D22's bound). The nouns, corrected by the operator the
+same day: a **team is the account, the tenant** (0013's "teams are
+accounts"); the declared signing key is a **role** — wire field, client,
+CLI, and internals renamed before any consumer wired in. Proven in the
+M3-gate e2e [measured]: the by-name-minted JWT admits to the
+operator-mode realm; with a second role imported the binding path refuses
+as ambiguous while both roles stay reachable by name. Named, not built:
+the token lane's own named-role answer (node enrollment), and per-role
+tag policy.
 
 **One noun: persona** ([episode 0016](0016-one-noun-persona.md); D27 in
 [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), constitution 1.3.1):
@@ -220,4 +224,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0014 | [The cross-service proof: the seam carries a real record](0014-the-cross-service-proof.md) |
 | 0015 | [The vault is the directory: ephemeral users, keys on first touch](0015-the-vault-is-the-directory.md) |
 | 0016 | [One noun: persona](0016-one-noun-persona.md) |
-| 0017 | [Role selection by declared team name: the ephemeral mint op](0017-role-selection-by-team-name.md) |
+| 0017 | [Role selection by declared name: the ephemeral mint op](0017-role-selection-by-name.md) |

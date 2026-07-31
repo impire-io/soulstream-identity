@@ -154,7 +154,7 @@ jetstream { store_dir: %q }
 
 	// --- The service: vault + token store on APP's JetStream, the surface
 	// on the APP connection, the issuer on the AUTH connection (D21). No
-	// registry (D25): the token record names the identity, the team binding
+	// registry (D25): the token record names the identity, the role binding
 	// authorizes it, and the operator's creds ARE the admin declaration.
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
@@ -220,7 +220,7 @@ jetstream { store_dir: %q }
 	t.Cleanup(ncAdmin.Close)
 	admin := client.New(ncAdmin, appPub, "ops")
 	if _, err := admin.ImportKey("acme", client.KindNATSAccountSigningKey, string(roleSeed), appPub, ""); err != nil {
-		t.Fatalf("import team key: %v", err)
+		t.Fatalf("import role key: %v", err)
 	}
 	if _, err := admin.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, string(authSKSeed), authPub, ""); err != nil {
 		t.Fatalf("import auth key: %v", err)
@@ -309,17 +309,18 @@ jetstream { store_dir: %q }
 // TestEntraGateAgainstOperatorModeServer is the OIDC lane's end-to-end
 // proof [measured] (specs/001-entra-oidc-backend, D23/D24): an external
 // client holding the sentinel creds and a stub-issued Entra-shaped access
-// token whose role value names a declared team, admitted through the sealed
+// token whose role value names a declared role, admitted through the sealed
 // callout leg with server-enforced scope and full attribution; undeclared
-// and ambiguous teams refused; the sit_ lane coexisting untouched; and the
+// and ambiguous roles refused; the sit_ lane coexisting untouched; and the
 // revocation bound demonstrated — a still-valid cached token re-admits
 // after the TTL disconnect, a role-stripped fresh token refuses.
 func TestEntraGateAgainstOperatorModeServer(t *testing.T) {
 	// --- The realm: operator, SYS, AUTH (external authorization + xkey),
-	// APP (the service's own account, JetStream), and TWO team accounts —
+	// APP (the service's own account, JetStream), and TWO tenant accounts —
 	// ENG and PLAT, each with its scoped signing key (SC-007's rig on the
-	// D25 shape: a team is an account signing key bound to its account, and
-	// the token lane resolves by that binding, so teams are accounts).
+	// D25 shape, nouns per D28: a role is an account signing key bound to
+	// its account — the role IS the account, the tenant — and the token
+	// lane resolves by that binding).
 	opKP, _ := nkeys.CreateOperator()
 	opPub, _ := opKP.PublicKey()
 	sysKP, _ := nkeys.CreateAccount()
@@ -464,7 +465,7 @@ jetstream { store_dir: %q }
 
 	// --- The service + issuer, with the OIDC lane against the local stub
 	// (FR-011) and a short TTL so the revocation bound is observable. No
-	// registry (D25): the team bindings and the token store carry every
+	// registry (D25): the role bindings and the token store carry every
 	// declared fact.
 	firstKP, _ := nkeys.CreateCurveKeys()
 	firstSeed, _ := firstKP.Seed()
@@ -532,7 +533,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("issuer flush: %v", err)
 	}
 
-	// --- Admin provisions: the two teams with their account bindings, the
+	// --- Admin provisions: the two roles with their account bindings, the
 	// AUTH key, one API token (coexistence), the sentinel. Note what is NOT
 	// provisioned: nothing names the oid — zero per-person acts (SC-001).
 	ncAdmin, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(adminCreds))
@@ -563,7 +564,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("write sentinel creds: %v", err)
 	}
 
-	// --- Bar 1 [measured]: a delegated token naming one declared team
+	// --- Bar 1 [measured]: a delegated token naming one declared role
 	// admits through the sealed leg with server-enforced scope.
 	const oid = "aaaaaaaa-1111-2222-3333-bbbbbbbbcccc"
 	claims := stub.Claims(oid, "engineering")
@@ -604,7 +605,7 @@ jetstream { store_dir: %q }
 	case <-time.After(5 * time.Second):
 		t.Fatal("out-of-scope publish drew no permission violation")
 	}
-	for _, want := range []string{"lane=oidc", "team=engineering", "subject=" + oid,
+	for _, want := range []string{"lane=oidc", "role=engineering", "subject=" + oid,
 		"display=daan@example.com", "issuer=" + stub.Issuer()} {
 		if !strings.Contains(audit.String(), want) {
 			t.Fatalf("attribution %q missing from audit:\n%s", want, audit.String())
@@ -633,7 +634,7 @@ jetstream { store_dir: %q }
 		}
 	}
 
-	// --- Refusals [measured]: an undeclared team, then ambiguity.
+	// --- Refusals [measured]: an undeclared role, then ambiguity.
 	unknownTok, err := stub.Token(stub.Claims(oid, "marketing"))
 	if err != nil {
 		t.Fatalf("stub token: %v", err)
@@ -641,7 +642,7 @@ jetstream { store_dir: %q }
 	if nc, err := nats.Connect(srv.ClientURL(),
 		nats.UserCredentials(sentinelCreds), nats.Token(unknownTok)); err == nil {
 		nc.Close()
-		t.Fatal("an undeclared team admitted")
+		t.Fatal("an undeclared role admitted")
 	}
 	ambiguousTok, err := stub.Token(stub.Claims(oid, "engineering", "platform"))
 	if err != nil {
@@ -652,15 +653,15 @@ jetstream { store_dir: %q }
 		nc.Close()
 		t.Fatal("an ambiguous role set admitted")
 	}
-	for _, want := range []string{"no declared team", "ambiguous"} {
+	for _, want := range []string{"no declared role", "ambiguous"} {
 		if !strings.Contains(audit.String(), want) {
 			t.Fatalf("refusal reason %q missing from audit:\n%s", want, audit.String())
 		}
 	}
 
 	// --- Coexistence [measured]: the sit_ lane admits via its token record
-	// and the team binding with the OIDC lane configured; both lanes share
-	// the declared team set (D24, D25).
+	// and the role binding with the OIDC lane configured; both lanes share
+	// the declared role set (D24, D25).
 	ncTok, err := nats.Connect(srv.ClientURL(),
 		nats.UserCredentials(sentinelCreds), nats.Token(created.Token))
 	if err != nil {

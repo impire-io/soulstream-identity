@@ -186,9 +186,10 @@ D-decision — as declared configuration, never a field on a token record
 
 *Amended 2026-07-31 (journey 0017): the reversal condition fired —
 soulrealm's fleet needs one scoped key per role on one account
-(soulidentity#1). D28 answers it: role selection by declared team name,
+(soulidentity#1). D28 answers it: role selection by declared role name,
 exposed as the `mint.ephemeral` op; the binding path's ambiguity refusal
-stands unchanged.*
+stands unchanged. The nouns, fixed the same day: a team is the account,
+the tenant; a role is the declared signing key.*
 
 ## D6 — Act-as is the runtime shadow of `operated_by`
 
@@ -450,26 +451,33 @@ the ecosystem speaking two languages forever. The vocabulary, fixed:
 soulstream release changing the `Soulstream-Author` vocabulary or the
 persona subjects) reopens this alignment as a new D-decision.
 
-## D28 — Role selection by declared team name
+## D28 — Role selection by declared role name
 
 *Decided 2026-07-31 (journey 0017, soulidentity#1) — the D5 amendment's
-reversal condition, fired exactly as written.* Soulrealm's fleet research
-needs one scoped signing key **per role** on one realm account
+reversal condition, fired exactly as written; nouns corrected by the
+operator the same day (see the amendment below).* Soulrealm's fleet
+research needs one scoped signing key **per role** on one realm account
 (`soulrealm-agent`, `soulrealm-tool`, later `soulrealm-node`), and measured
 `[measured, soulrealm journey 0010]` that the shape holds: per-tag scoped
 templates clamp in both directions, and a user JWT carrying its own
 permissions but signed by a scoped key is rejected at connection time — the
 mint path cannot over-scope. Importing those keys makes the account
-multi-team, which the binding path refuses as ambiguous — the observable
+multi-role, which the binding path refuses as ambiguous — the observable
 D5's amendment watches. As that condition instructs, role selection reopens
 **as declared configuration, never a field on a token record** (D22's
-watch): the selector is the **team name**, the vault entry name of an
+watch): the selector is the **role name**, the vault entry name of an
 account signing key carrying its D24 account binding. This is the same
-move the claims lane already made ("the role value IS the team name",
-D24); D28 extends it to the client-facing mint.
+move the claims lane already made (D24 — the roles claim names the
+declared signing key); D28 extends it to the client-facing mint.
+
+The nouns, fixed (the D27 discipline applied to authorization): a **team
+is the account — the tenant** (journey 0013's own line: "teams are
+accounts"); a **role is a declared scoped signing key bound to its
+account** — D5's original word, restored. "Team" is never the noun for a
+signing key.
 
 - **The op**: `mint.ephemeral` issues an ephemeral scoped user JWT against
-  a named team, for a **caller-supplied user public key** — the workload
+  a named role, for a **caller-supplied user public key** — the workload
   generates its keypair locally; no vault entry, no seed in either
   direction, the response is the JWT alone (constitution I holds by
   construction; the creds escape cannot exist here, there is no seed to
@@ -481,14 +489,14 @@ D24); D28 extends it to the client-facing mint.
   decision, like every op tail (D25).
 - **Binding-resolved lanes refuse, by design**: the durable `mint` op and
   the token-lane callout still resolve by the account's binding
-  (`TeamForAccount`) and keep refusing a multi-team account as ambiguous —
-  import order must never decide which key signs. A multi-team account is
+  (`RoleForAccount`) and keep refusing a multi-role account as ambiguous —
+  import order must never decide which key signs. A multi-role account is
   reachable only where a declared name selects the role.
 - **Named follow-up, not built**: when node enrollment lands on the token
-  lane (API token → node creds), team selection there needs its own
-  declared-configuration answer — a team field on the token record stays
+  lane (API token → node creds), role selection there needs its own
+  declared-configuration answer — a role field on the token record stays
   barred (D22's watch). Trigger: a consumer blocked on a token-lane
-  callout refusal against a multi-team account, recorded as an issue.
+  callout refusal against a multi-role account, recorded as an issue.
 - **Tag policy is named, not built** (constitution III): who may request
   which tag values is unenforced — the scoped template clamps the shape,
   TTL bounds the credential, and every mint is attributed to its
@@ -496,6 +504,13 @@ D24); D28 extends it to the client-facing mint.
   worse than what a free-minting runner could already do
   `[mechanism-argument]`. Trigger: a consumer or incident showing
   tag-value abuse a scoped template cannot express, recorded as an issue.
+
+*Amended 2026-07-31, hours after landing (journey 0017): the operator
+corrected the noun — the decision first shipped saying "team" for the
+declared signing key, which made "multi-team account" incoherent against
+journey 0013's "teams are accounts". The wire field, client parameter, CLI
+flag, and internal identifiers renamed team → role in the same day, before
+any consumer wired in; the mechanics are unchanged.*
 
 **Reversal condition**: a deployment whose role landscape outgrows
 declared names — needing per-request or computed role derivation

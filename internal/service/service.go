@@ -6,7 +6,7 @@
 // which ops a principal may even publish is the deployment's permission
 // template (D25). This package never re-verifies either claim; it applies only
 // the data-dependent policy the ACL cannot express: the vault bindings — the
-// persona key's owner (D6 as amended), the account's team (D24).
+// persona key's owner (D6 as amended), the account's role (D24, D28).
 package service
 
 import (
@@ -180,7 +180,7 @@ type importKeyRequest struct {
 	Kind   string `json:"kind"`
 	Secret string `json:"secret"`
 	// The binding (D25): an account signing key requires Account — the
-	// account it signs for (the team object, D24); a persona signing key
+	// account it signs for (the role's binding, D24); a persona signing key
 	// requires (Account, User) — its owner (D6 as amended); empty otherwise.
 	Account string `json:"account,omitempty"`
 	User    string `json:"user,omitempty"`
@@ -222,7 +222,7 @@ type mintResponse struct {
 }
 
 type mintEphemeralRequest struct {
-	Team          string   `json:"team"`
+	Role          string   `json:"role"`
 	User          string   `json:"user"`
 	UserPublicKey string   `json:"user_public_key"`
 	TTLSeconds    int64    `json:"ttl_seconds"`
@@ -383,12 +383,12 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if req.User == "" {
 			return nil, errors.New("service: an ephemeral mint names its user")
 		}
-		token, boundAccount, err := mint.ForTeam(s.vault, req.Team, req.User,
+		token, boundAccount, err := mint.ForRole(s.vault, req.Role, req.User,
 			req.UserPublicKey, time.Duration(req.TTLSeconds)*time.Second, req.Tags)
 		if err != nil {
 			return nil, err
 		}
-		s.allow(account, user, op, "team", req.Team,
+		s.allow(account, user, op, "role", req.Role,
 			"target_account", boundAccount, "target_user", req.User,
 			"user_key", req.UserPublicKey, "ttl_seconds", req.TTLSeconds,
 			"tags", strings.Join(req.Tags, ","))

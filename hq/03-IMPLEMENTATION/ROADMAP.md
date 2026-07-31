@@ -6,17 +6,18 @@ gate.*
 
 ## Where we are (2026-07-31)
 
-**The ephemeral team-named mint — D28, M2's first consumer-proven
-addition** ([journey 0017](../04-JOURNEY/0017-role-selection-by-team-name.md),
+**The ephemeral role-named mint — D28, M2's first consumer-proven
+addition** ([journey 0017](../04-JOURNEY/0017-role-selection-by-name.md),
 D28 in [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), answering
 soulidentity#1): soulrealm's fleet proved the missing op — `mint.ephemeral`
-issues an ephemeral scoped user JWT against a named team for a
+issues an ephemeral scoped user JWT against a named role for a
 caller-supplied public key, tags in the claims, TTL required. D5's
-amendment reversal condition fired and was answered: multi-team accounts
+amendment reversal condition fired and was answered: multi-role accounts
 are sanctioned where a declared name selects the role; binding-resolved
-lanes keep refusing ambiguity. Proven in the M3-gate e2e [measured].
-Named, not built: the token lane's named-team answer (node enrollment),
-per-team tag policy.
+lanes keep refusing ambiguity. The nouns, corrected same day: a team is
+the account, the tenant; the declared signing key is a role. Proven in
+the M3-gate e2e [measured]. Named, not built: the token lane's named-role
+answer (node enrollment), per-role tag policy.
 
 **One noun: persona — D27**
 ([journey 0016](../04-JOURNEY/0016-one-noun-persona.md), constitution
@@ -148,9 +149,9 @@ arrive over the NATS surface).
    connection per user with no node-held creds — soulstream's remote MCP
    node feature. This milestone lives mostly in the consuming repos; here
    it may add only what those consumers prove missing. First such addition,
-   landed 2026-07-31: soulrealm's fleet proved the ephemeral team-named
+   landed 2026-07-31: soulrealm's fleet proved the ephemeral role-named
    tagged mint missing (soulidentity#1) — `mint.ephemeral`, D28 (journey
-   [0017](../04-JOURNEY/0017-role-selection-by-team-name.md)).
+   [0017](../04-JOURNEY/0017-role-selection-by-name.md)).
 3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
    [journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md)). The
    agent's contract served over NATS request/reply with xkey-sealed

@@ -36,7 +36,8 @@ const (
 // Entry is a vault key as the API shows it: never the secret. The binding
 // fields are the authorization source (hq/02-DESIGN/nats-surface.md D25):
 // for an account signing key, Account is the account it signs for —
-// the team object's binding (hq/02-DESIGN/auth-callout.md D24); for a
+// the role's binding (hq/02-DESIGN/auth-callout.md D24, D28 — a role is a
+// declared signing key; a team is the account, the tenant); for a
 // persona signing key, (Account, User) is the owner principal that may sign
 // with it (hq/02-DESIGN/agent.md D6 as amended); both empty for user keys.
 type Entry struct {
@@ -178,8 +179,8 @@ func derive(kind Kind, secret string) (string, error) {
 // Import stores a secret under name. Existing names are refused, never
 // overwritten — a changed key is indistinguishable from a substitution.
 // The binding completes the key (D25): an account signing key requires
-// account — the account it signs for (the key name is the team name,
-// D24); a persona signing key requires (account, user) — the owner that
+// account — the account it signs for (the key name is the role name,
+// D24/D28); a persona signing key requires (account, user) — the owner that
 // may sign with it (D6 as amended); a user key refuses both.
 func (v *Vault) Import(name string, kind Kind, secret, account, user string) (Entry, error) {
 	if err := checkName(name); err != nil {
@@ -312,33 +313,34 @@ func (v *Vault) List() ([]Entry, error) {
 	return out, nil
 }
 
-// TeamForAccount resolves the team that signs for account: the one account
-// signing key whose binding names it (D24, resolved per D25 — every mint
-// path authorizes against this). None declared refuses; more than one
-// refuses as ambiguous, because import order must never decide which key
-// signs (the D5 amendment's reversal condition watches this refusal).
-func (v *Vault) TeamForAccount(account string) (Entry, error) {
+// RoleForAccount resolves the role that signs for account: the one account
+// signing key whose binding names it (D24, resolved per D25 — the
+// binding-resolved mint paths authorize against this). None declared
+// refuses; more than one refuses as ambiguous, because import order must
+// never decide which key signs — a multi-role account is reachable only by
+// role name (D28, answering the D5 amendment's reversal condition).
+func (v *Vault) RoleForAccount(account string) (Entry, error) {
 	entries, err := v.List()
 	if err != nil {
 		return Entry{}, err
 	}
-	var teams []Entry
+	var roles []Entry
 	for _, e := range entries {
 		if e.Kind == KindNATSAccountSigningKey && e.Account == account {
-			teams = append(teams, e)
+			roles = append(roles, e)
 		}
 	}
-	switch len(teams) {
+	switch len(roles) {
 	case 0:
-		return Entry{}, fmt.Errorf("vault: no team is bound to account %s", account)
+		return Entry{}, fmt.Errorf("vault: no role is bound to account %s", account)
 	case 1:
-		return teams[0], nil
+		return roles[0], nil
 	default:
-		names := make([]string, len(teams))
-		for i, e := range teams {
+		names := make([]string, len(roles))
+		for i, e := range roles {
 			names[i] = e.Name
 		}
-		return Entry{}, fmt.Errorf("vault: %d teams are bound to account %s (%s) — ambiguous", len(teams), account, strings.Join(names, ", "))
+		return Entry{}, fmt.Errorf("vault: %d roles are bound to account %s (%s) — ambiguous", len(roles), account, strings.Join(names, ", "))
 	}
 }
 

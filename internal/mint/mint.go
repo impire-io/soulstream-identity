@@ -27,11 +27,12 @@ type Result struct {
 	UserPublicKey string `json:"user_public_key"`
 }
 
-// teamKey resolves the signing key for account by its D24 binding — the
-// authorize step of every mint path since the registry dissolved (D25,
-// D5 as amended): the team the account binds to is the only role there is.
-func teamKey(v *vault.Vault, account string) (nkeys.KeyPair, error) {
-	e, err := v.TeamForAccount(account)
+// roleKey resolves the signing key for account by its D24 binding — the
+// authorize step of the binding-resolved mint paths (D25, D5 as amended):
+// the account's one declared role. A multi-role account refuses here and
+// is reachable only by role name (D28).
+func roleKey(v *vault.Vault, account string) (nkeys.KeyPair, error) {
+	e, err := v.RoleForAccount(account)
 	if err != nil {
 		return nil, fmt.Errorf("mint: %w", err)
 	}
@@ -55,7 +56,7 @@ func claims(userPub, account, user string) *jwt.UserClaims {
 // (provisioning, ACL-gated per D25) — with the user key generated inside
 // the vault and reused across mints.
 func Mint(v *vault.Vault, account, user string) (Result, error) {
-	kp, err := teamKey(v, account)
+	kp, err := roleKey(v, account)
 	if err != nil {
 		return Result{}, err
 	}
@@ -73,39 +74,39 @@ func Mint(v *vault.Vault, account, user string) (Result, error) {
 // ForKey issues an ephemeral scoped user JWT for a caller-provided user
 // public key — the auth-callout path (hq/02-DESIGN/auth-callout.md D20),
 // where the key is server-assigned and no vault key exists or is created.
-// The authorize stage is the target account's team binding (D22 as
+// The authorize stage is the target account's role binding (D22 as
 // amended, D25); ttl bounds the credential and is the revocation
 // propagation bound (D22).
 func ForKey(v *vault.Vault, account, user, userPub string, ttl time.Duration) (string, error) {
-	kp, err := teamKey(v, account)
+	kp, err := roleKey(v, account)
 	if err != nil {
 		return "", err
 	}
 	return ephemeral(kp, account, user, userPub, ttl, nil)
 }
 
-// ForTeam issues an ephemeral scoped user JWT for a named team — role
-// selection by declared configuration (D28): the team name resolves directly
+// ForRole issues an ephemeral scoped user JWT for a named role — role
+// selection by declared configuration (D28): the role name resolves directly
 // to its vault signing key and the account binding recorded at import — no
 // registry row, no mapping store. The claims-derived callout lane (D24) and
 // the mint.ephemeral op both end here; only the by-name paths reach a
-// multi-team account, the binding-resolved paths keep refusing it as
+// multi-role account, the binding-resolved paths keep refusing it as
 // ambiguous (D5 as amended). subject names the minted user (the stable oid
 // on the claims lane, D27) and tags ride into the user claims for the
 // scoped template to resolve. Returns the bound account beside the token so
 // the caller can attribute the mint in full.
-func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration, tags []string) (string, string, error) {
-	e, err := v.Get(team)
+func ForRole(v *vault.Vault, role, subject, userPub string, ttl time.Duration, tags []string) (string, string, error) {
+	e, err := v.Get(role)
 	if err != nil {
-		return "", "", fmt.Errorf("mint: no declared team %q: %w", team, err)
+		return "", "", fmt.Errorf("mint: no declared role %q: %w", role, err)
 	}
 	if e.Kind != vault.KindNATSAccountSigningKey {
-		return "", "", fmt.Errorf("mint: team %q is %q, want %q", team, e.Kind, vault.KindNATSAccountSigningKey)
+		return "", "", fmt.Errorf("mint: role %q is %q, want %q", role, e.Kind, vault.KindNATSAccountSigningKey)
 	}
 	if e.Account == "" {
-		return "", "", fmt.Errorf("mint: team %q has no account binding — reimport it with its account", team)
+		return "", "", fmt.Errorf("mint: role %q has no account binding — reimport it with its account", role)
 	}
-	kp, err := v.KeyPair(team)
+	kp, err := v.KeyPair(role)
 	if err != nil {
 		return "", "", err
 	}
@@ -118,7 +119,7 @@ func ForTeam(v *vault.Vault, team, subject, userPub string, ttl time.Duration, t
 
 // ephemeral is the shared mint tail (D20): scoped, permission-less,
 // TTL-bounded claims for the caller-provided key, signed by the resolved
-// signing key. Both authorize sources (account binding, declared team) end
+// signing key. Both authorize sources (account binding, declared role) end
 // here. Tags are inert on their own — only a scoped template that derives
 // subjects from them gives them meaning (D28) — and follow NATS tag
 // semantics on encode (lowercased, trimmed, deduplicated).

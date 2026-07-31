@@ -54,7 +54,7 @@ const (
 //     refused by the server and never reaches the service — the D25 op-tail
 //     gate, zero service decisions;
 //  6. an ephemeral by-name mint (D28) for a caller-held key admits to the
-//     realm with the template's scope, and a second team on the account
+//     realm with the template's scope, and a second role on the account
 //     leaves by-name minting reachable where the binding path refuses.
 func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	// --- The realm: operator, SYS, one account with JetStream and a scoped
@@ -192,7 +192,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("service start: %v", err)
 	}
 
-	// --- The operator provisions through the sealed surface: the team (the
+	// --- The operator provisions through the sealed surface: the role (the
 	// scoped signing key, bound to its account — D24) and daan's persona key
 	// (bound to its owner — D6 as amended) enter the vault and are never
 	// seen again; daan's creds leave through the loud escape (D7). The key
@@ -398,18 +398,18 @@ jetstream { store_dir: %q }
 		t.Fatalf("ephemeral by-name mint did not admit: %v", err)
 	}
 	ncProber.Close()
-	// A second team bound to the same account: the binding-resolved durable
+	// A second role bound to the same account: the binding-resolved durable
 	// mint refuses as ambiguous, by-name minting reaches the new role — the
 	// D5 amendment's reversal condition, answered (D28).
 	ask2KP, _ := nkeys.CreateAccount()
 	ask2Pub, _ := ask2KP.PublicKey()
 	ask2Seed, _ := ask2KP.Seed()
 	if _, err := admin.ImportKey("acme-tool", client.KindNATSAccountSigningKey, string(ask2Seed), accPub, ""); err != nil {
-		t.Fatalf("import second team: %v", err)
+		t.Fatalf("import second role: %v", err)
 	}
 	if _, err := admin.Mint(accPub, "daan"); err == nil ||
 		!strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("binding path must refuse a multi-team account as ambiguous, got %v", err)
+		t.Fatalf("binding path must refuse a multi-role account as ambiguous, got %v", err)
 	}
 	toolJWT, err := admin.MintEphemeral("acme-tool", "prober", proberPub, time.Minute, nil)
 	if err != nil {
@@ -420,7 +420,7 @@ jetstream { store_dir: %q }
 		t.Fatalf("second-role JWT does not decode: %v", err)
 	}
 	if toolClaims.Issuer != ask2Pub {
-		t.Fatalf("second-role issuer %q is not its team's key %q", toolClaims.Issuer, ask2Pub)
+		t.Fatalf("second-role issuer %q is not its role's key %q", toolClaims.Issuer, ask2Pub)
 	}
 
 	// --- Proof 3 [measured]: the vault's stream holds ciphertext only at

@@ -11,7 +11,7 @@ import (
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// harness: a vault holding one team — an account signing key bound to its
+// harness: a vault holding one role — an account signing key bound to its
 // account (D24) — the authorize source of every mint path (D25).
 func harness(t *testing.T) (*vault.Vault, string, string) {
 	t.Helper()
@@ -70,23 +70,23 @@ func TestMintIssuesScopedUserJWT(t *testing.T) {
 func TestMintRefusals(t *testing.T) {
 	v, accPub, _ := harness(t)
 
-	// An account no team is bound to: refused (D25 — the binding is the
+	// An account no role is bound to: refused (D25 — the binding is the
 	// authorize source; there is nothing else to consult).
 	strayKP, _ := nkeys.CreateAccount()
 	strayPub, _ := strayKP.PublicKey()
 	if _, err := Mint(v, strayPub, "daan"); err == nil {
-		t.Fatal("minted for an account with no bound team")
+		t.Fatal("minted for an account with no bound role")
 	}
 
-	// A second team bound to the same account: ambiguous, refused (the D5
+	// A second role bound to the same account: ambiguous, refused (the D5
 	// amendment's reversal condition watches this refusal).
 	ask2KP, _ := nkeys.CreateAccount()
 	ask2Seed, _ := ask2KP.Seed()
 	if _, err := v.Import("acme-2", vault.KindNATSAccountSigningKey, string(ask2Seed), accPub, ""); err != nil {
-		t.Fatalf("import second team: %v", err)
+		t.Fatalf("import second role: %v", err)
 	}
 	if _, err := Mint(v, accPub, "daan"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("two bound teams must refuse as ambiguous, got %v", err)
+		t.Fatalf("two bound roles must refuse as ambiguous, got %v", err)
 	}
 }
 
@@ -125,22 +125,22 @@ func TestMintForKeyIssuesEphemeralScopedJWT(t *testing.T) {
 	strayKP, _ := nkeys.CreateAccount()
 	strayPub, _ := strayKP.PublicKey()
 	if _, err := ForKey(v, strayPub, "daan", upub, time.Minute); err == nil {
-		t.Fatal("minted for an account with no bound team")
+		t.Fatal("minted for an account with no bound role")
 	}
 }
 
-func TestMintForTeamSelectsByName(t *testing.T) {
+func TestMintForRoleSelectsByName(t *testing.T) {
 	v, accPub, askPub := harness(t)
 	ukp, _ := nkeys.CreateUser()
 	upub, _ := ukp.PublicKey()
 
-	token, boundAccount, err := ForTeam(v, "acme", "prober", upub, time.Minute,
+	token, boundAccount, err := ForRole(v, "acme", "prober", upub, time.Minute,
 		[]string{"topic:planning-x7", "persona:Prober"})
 	if err != nil {
-		t.Fatalf("ForTeam: %v", err)
+		t.Fatalf("ForRole: %v", err)
 	}
 	if boundAccount != accPub {
-		t.Fatalf("bound account %q is not the team's binding %q", boundAccount, accPub)
+		t.Fatalf("bound account %q is not the role's binding %q", boundAccount, accPub)
 	}
 	uc, err := jwt.DecodeUserClaims(token)
 	if err != nil {
@@ -163,31 +163,31 @@ func TestMintForTeamSelectsByName(t *testing.T) {
 		t.Fatalf("tags missing from claims: %v", uc.Tags)
 	}
 
-	if _, _, err := ForTeam(v, "nobody", "prober", upub, time.Minute, nil); err == nil {
-		t.Fatal("unknown team accepted")
+	if _, _, err := ForRole(v, "nobody", "prober", upub, time.Minute, nil); err == nil {
+		t.Fatal("unknown role accepted")
 	}
-	if _, _, err := ForTeam(v, "acme", "prober", "not-a-key", time.Minute, nil); err == nil {
+	if _, _, err := ForRole(v, "acme", "prober", "not-a-key", time.Minute, nil); err == nil {
 		t.Fatal("bad public key accepted")
 	}
-	if _, _, err := ForTeam(v, "acme", "prober", upub, 0, nil); err == nil {
+	if _, _, err := ForRole(v, "acme", "prober", upub, 0, nil); err == nil {
 		t.Fatal("zero ttl accepted — an unbounded ephemeral credential")
 	}
-	if _, _, err := ForTeam(v, "acme", "prober", upub, time.Minute, []string{" "}); err == nil {
+	if _, _, err := ForRole(v, "acme", "prober", upub, time.Minute, []string{" "}); err == nil {
 		t.Fatal("blank tag accepted")
 	}
-	// A team must be an account signing key, whatever else the name resolves to.
+	// A role must be an account signing key, whatever else the name resolves to.
 	strayUser, _ := nkeys.CreateUser()
 	strayUserSeed, _ := strayUser.Seed()
-	if _, err := v.Import("not-a-team", vault.KindNATSUserKey, string(strayUserSeed), "", ""); err != nil {
+	if _, err := v.Import("not-a-role", vault.KindNATSUserKey, string(strayUserSeed), "", ""); err != nil {
 		t.Fatalf("import user key: %v", err)
 	}
-	if _, _, err := ForTeam(v, "not-a-team", "prober", upub, time.Minute, nil); err == nil {
-		t.Fatal("a non-signing-key entry accepted as a team")
+	if _, _, err := ForRole(v, "not-a-role", "prober", upub, time.Minute, nil); err == nil {
+		t.Fatal("a non-signing-key entry accepted as a role")
 	}
 }
 
-func TestMintForTeamReachesMultiTeamAccounts(t *testing.T) {
-	// The D28 proof: with two teams bound to one account, the binding path
+func TestMintForRoleReachesMultiRoleAccounts(t *testing.T) {
+	// The D28 proof: with two roles bound to one account, the binding path
 	// refuses as ambiguous while by-name selection reaches each role —
 	// declared configuration, never import order, decides which key signs.
 	v, accPub, askPub := harness(t)
@@ -195,29 +195,29 @@ func TestMintForTeamReachesMultiTeamAccounts(t *testing.T) {
 	ask2Seed, _ := ask2KP.Seed()
 	ask2Pub, _ := ask2KP.PublicKey()
 	if _, err := v.Import("acme-tool", vault.KindNATSAccountSigningKey, string(ask2Seed), accPub, ""); err != nil {
-		t.Fatalf("import second team: %v", err)
+		t.Fatalf("import second role: %v", err)
 	}
 	ukp, _ := nkeys.CreateUser()
 	upub, _ := ukp.PublicKey()
 
 	if _, err := Mint(v, accPub, "daan"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("binding path must refuse a multi-team account as ambiguous, got %v", err)
+		t.Fatalf("binding path must refuse a multi-role account as ambiguous, got %v", err)
 	}
 	if _, err := ForKey(v, accPub, "daan", upub, time.Minute); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("binding path must refuse a multi-team account as ambiguous, got %v", err)
+		t.Fatalf("binding path must refuse a multi-role account as ambiguous, got %v", err)
 	}
 
-	for team, wantIssuer := range map[string]string{"acme": askPub, "acme-tool": ask2Pub} {
-		token, _, err := ForTeam(v, team, "prober", upub, time.Minute, nil)
+	for role, wantIssuer := range map[string]string{"acme": askPub, "acme-tool": ask2Pub} {
+		token, _, err := ForRole(v, role, "prober", upub, time.Minute, nil)
 		if err != nil {
-			t.Fatalf("ForTeam(%s): %v", team, err)
+			t.Fatalf("ForRole(%s): %v", role, err)
 		}
 		uc, err := jwt.DecodeUserClaims(token)
 		if err != nil {
-			t.Fatalf("JWT for %s does not decode: %v", team, err)
+			t.Fatalf("JWT for %s does not decode: %v", role, err)
 		}
 		if uc.Issuer != wantIssuer {
-			t.Fatalf("team %s: issuer %q is not its signing key %q", team, uc.Issuer, wantIssuer)
+			t.Fatalf("role %s: issuer %q is not its signing key %q", role, uc.Issuer, wantIssuer)
 		}
 	}
 }

@@ -33,7 +33,7 @@ Subjects below are shown at the bare default root; a deployment prefix
 | `soulidentity.<acct>.<user>.identities.put` | `POST /v1/identities` | admin | unchanged |
 | `soulidentity.<acct>.<user>.sign.record` | `POST /v1/sign/record` | act-as (D6) | unchanged; `key` must be `persona/<persona>` |
 | `soulidentity.<acct>.<user>.mint` | `POST /v1/mint` | self, or admin for others | unchanged (creds export stays the loud D7 escape) |
-| `soulidentity.<acct>.<user>.mint.ephemeral` | — (M2, agent.md D28) | ACL-gated op tail (D25); team by name | `{team, user, user_public_key, ttl_seconds, tags?}` → `{jwt}` — the caller's own key, JWT only, no creds escape exists |
+| `soulidentity.<acct>.<user>.mint.ephemeral` | — (M2, agent.md D28) | ACL-gated op tail (D25); role by name | `{role, user, user_public_key, ttl_seconds, tags?}` → `{jwt}` — the caller's own key, JWT only, no creds escape exists |
 | `soulidentity.<acct>.<user>.tokens.create` | — (M4) | admin | `{account, user, label?, ttl_seconds?}` → `{token, digest}` — plaintext once (D22) |
 | `soulidentity.<acct>.<user>.tokens.list` | — (M4) | admin | → `{tokens: [{digest, account, user, label?, expires?}]}` |
 | `soulidentity.<acct>.<user>.tokens.revoke` | — (M4) | admin | `{digest}` |
@@ -233,14 +233,16 @@ the key bindings. Authorization now has exactly two homes:
   `mint`, `sentinel.mint`). A non-operator publishing an admin op is
   refused by the server before the service ever sees it — zero service
   decisions, the D15 proof extended [measured, M3-gate shape].
-- **The vault bindings gate the data-dependent decisions.** A team is an
-  account signing key bound to its account (D24); a persona key is bound
-  to its owner (account, user) (D6 as amended); `sign.record` and
-  `keys.public` check the caller against the binding; every mint resolves
-  its signing key by the target account's binding (D5 as amended).
+- **The vault bindings gate the data-dependent decisions.** A role is an
+  account signing key bound to its account (D24; noun per D28 — a team is
+  the account, the tenant); a persona key is bound to its owner (account,
+  user) (D6 as amended); `sign.record` and `keys.public` check the caller
+  against the binding; the binding-resolved mints resolve their signing
+  key by the target account's binding (D5 as amended), the by-name mint
+  by declared role name (D28).
 
 What remains declared (D2's principle, relocated): token records name the
-token lane's identities, bindings name teams and persona owners, permission
+token lane's identities, bindings name roles and persona owners, permission
 templates name the op grants, and the OIDC lane stays claims-derived
 (D23/D24) — the one registry still standing is the **token store**, which
 was never policy (D22). Mint is an operator op: with no row to authorize

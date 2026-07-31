@@ -1,6 +1,6 @@
 // The issuer: the mint with a callout trigger (hq/02-DESIGN/auth-callout.md
 // D20). It validates the presented token (D22 stage 1), authorizes against
-// the vault's team bindings (stage 2 — D24, D25), and answers the server
+// the vault's role bindings (stage 2 — D24, D25), and answers the server
 // with a scoped ephemeral user JWT for the server-assigned key. No response
 // or an error response means no admission — fail-closed is the protocol's
 // own property; nothing here may add an admit-on-timeout convenience.
@@ -168,8 +168,8 @@ func (i *Issuer) decide(req *jwt.AuthorizationRequestClaims) (string, error) {
 }
 
 // decideToken is the sit_ lane: digest validation, then authorize-and-mint
-// via the team bound to the token record's account (D22 as amended, D25) —
-// the same declared team set the OIDC lane resolves by name (D24).
+// via the role bound to the token record's account (D22 as amended, D25) —
+// the same declared role set the OIDC lane resolves by name (D24).
 func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (string, error) {
 	sub, err := i.api.Validate(cred)
 	if err != nil {
@@ -192,7 +192,7 @@ func (i *Issuer) decideToken(req *jwt.AuthorizationRequestClaims, cred string) (
 }
 
 // decideOIDC is the eyJ lane (D23/D24): validate against the pinned issuer,
-// authorize by the declared team the roles claim names, mint for the
+// authorize by the declared role the roles claim names, mint for the
 // server-assigned key. The claims path never confers admin or personas —
 // the mint issues the same scoped, permission-less claims as every lane.
 func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (string, error) {
@@ -207,17 +207,17 @@ func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (s
 			"client_host", req.ClientInformation.Host, "client_name", req.ConnectOptions.Name)
 		return "", errors.New("credential rejected")
 	}
-	team, err := i.teamFor(sub.Roles)
+	role, err := i.roleFor(sub.Roles)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
 			"issuer", sub.Issuer, "subject", sub.OID,
 			"client_host", req.ClientInformation.Host)
 		return "", errors.New("not authorized")
 	}
-	userJWT, _, err := mint.ForTeam(i.vault, team, sub.OID, req.UserNkey, i.ttl, nil)
+	userJWT, _, err := mint.ForRole(i.vault, role, sub.OID, req.UserNkey, i.ttl, nil)
 	if err != nil {
 		i.log.Warn("callout REFUSED", "lane", string(LaneOIDC), "err", err.Error(),
-			"issuer", sub.Issuer, "subject", sub.OID, "team", team,
+			"issuer", sub.Issuer, "subject", sub.OID, "role", role,
 			"client_host", req.ClientInformation.Host)
 		return "", errors.New("not authorized")
 	}
@@ -226,25 +226,26 @@ func (i *Issuer) decideOIDC(req *jwt.AuthorizationRequestClaims, cred string) (s
 		display = "-" // app-only tokens carry no preferred_username
 	}
 	i.log.Info("callout ADMITTED", "lane", string(LaneOIDC), "issuer", sub.Issuer,
-		"subject", sub.OID, "team", team, "display", display,
+		"subject", sub.OID, "role", role, "display", display,
 		"client_host", req.ClientInformation.Host,
 		"user_nkey", req.UserNkey, "ttl", i.ttl.String())
 	return userJWT, nil
 }
 
-// teamFor is D24's authorize: exactly one role value must name a declared
-// team — an account signing key carrying its account binding. Values naming
-// nothing are inert (the tenant cannot invent teams); more than one match
-// is ambiguous and refuses, because claim order must never decide
-// authorization.
-func (i *Issuer) teamFor(roles []string) (string, error) {
+// roleFor is D24's authorize: exactly one roles-claim value must name a
+// declared role — an account signing key carrying its account binding (the
+// one noun, D28: a role is the declared signing key; a team is the account,
+// the tenant). Values naming nothing are inert (the tenant cannot invent
+// roles); more than one match is ambiguous and refuses, because claim
+// order must never decide authorization.
+func (i *Issuer) roleFor(roles []string) (string, error) {
 	if len(roles) == 0 {
 		return "", errors.New("token carries no roles claim")
 	}
-	var teams []string
+	var declared []string
 	for _, role := range roles {
 		if role == i.authKeyName {
-			continue // the issuer's own signing key is infrastructure, never a team
+			continue // the issuer's own signing key is infrastructure, never a role
 		}
 		e, err := i.vault.Get(role)
 		if err != nil {
@@ -253,14 +254,14 @@ func (i *Issuer) teamFor(roles []string) (string, error) {
 		if e.Kind != vault.KindNATSAccountSigningKey || e.Account == "" {
 			continue
 		}
-		teams = append(teams, role)
+		declared = append(declared, role)
 	}
-	switch len(teams) {
+	switch len(declared) {
 	case 0:
-		return "", fmt.Errorf("no declared team among roles %v", roles)
+		return "", fmt.Errorf("no declared role among roles %v", roles)
 	case 1:
-		return teams[0], nil
+		return declared[0], nil
 	default:
-		return "", fmt.Errorf("ambiguous teams %v", teams)
+		return "", fmt.Errorf("ambiguous roles %v", declared)
 	}
 }

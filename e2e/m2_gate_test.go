@@ -33,7 +33,8 @@ import (
 // consumer story on one operator-mode server:
 //
 //   - daan is EPHEMERAL: no per-user provisioning act exists anywhere —
-//     the IAM-shaped acts are per-team (the team key) and per-connection
+//     the IAM-shaped acts are per-team (the role key; a team is the
+//     account, the tenant — D28) and per-connection
 //     (the minted credential); daan's persona key MATERIALIZES inside the
 //     vault on first touch, owner-bound to the server-proven principal
 //     (D26);
@@ -178,9 +179,9 @@ jetstream { store_dir: %q }
 	}
 
 	// --- The operator's acts are per-TEAM and per-CONNECTION only: the
-	// team key bound to its account, and daan's minted credential through
-	// the loud escape. Nothing names daan's persona — no import, no
-	// profile, no row. Users are ephemeral (D26).
+	// role key bound to its account (the team, D28), and daan's minted
+	// credential through the loud escape. Nothing names daan's persona —
+	// no import, no profile, no row. Users are ephemeral (D26).
 	ncAdmin, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(adminCreds))
 	if err != nil {
 		t.Fatalf("admin connect: %v", err)
@@ -188,7 +189,7 @@ jetstream { store_dir: %q }
 	t.Cleanup(ncAdmin.Close)
 	admin := client.New(ncAdmin, accPub, "ops")
 	if _, err := admin.ImportKey("acme", client.KindNATSAccountSigningKey, string(askSeed), accPub, ""); err != nil {
-		t.Fatalf("import team key: %v", err)
+		t.Fatalf("import role key: %v", err)
 	}
 	minted, err := admin.MintCreds(accPub, "daan")
 	if err != nil {

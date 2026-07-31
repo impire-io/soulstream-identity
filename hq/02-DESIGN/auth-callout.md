@@ -203,7 +203,16 @@ The authorize rule: **exactly one role value must name a declared team.**
 Zero matches refuse; more than one refuses as ambiguous, because claim
 order must never decide authorization; values naming no team are inert —
 the tenant cannot invent teams, and the issuer's own AUTH signing key is
-never a team [measured]. Delegated (human) and app-only (service
+never a team [measured].
+
+*Amended 2026-07-31 (journey 0017 — D28's noun correction): "team" above
+is the 2026-07-29 word for the declared object; the one noun is now
+**role** — a declared scoped signing key carrying its account binding —
+and a **team is the account, the tenant** (journey 0013's "teams are
+accounts"). Read D24's rule as: exactly one roles-claim value must name a
+declared role. The object and the mechanics are unchanged; only the noun
+moved, because D28 made accounts multi-role and "team" could no longer
+mean both the tenant and the key.* Delegated (human) and app-only (service
 principal) tokens both admit; the subject is keyed on the stable `oid`
 (users and service principals alike), with `preferred_username` logged
 for legibility and never keyed [measured]. **Admin and personas are never

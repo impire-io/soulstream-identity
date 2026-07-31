@@ -27,7 +27,7 @@ const Segment = "soulidentity"
 
 // Key is a vault entry as the service shows it: never the secret. The
 // binding fields are the authorization source (D25): for an account signing
-// key, Account is the account it signs for — the team's binding (D24); for
+// key, Account is the account it signs for — the role's binding (D24); for
 // a persona signing key, (Account, User) is the owner principal that may
 // sign with it; both empty for user keys.
 type Key struct {
@@ -214,7 +214,7 @@ func (c *Client) Status() (string, error) {
 // ImportKey stores a secret in the vault (write-only; the response carries
 // the public key). Existing names are refused. account and user are the
 // binding (D25): an account signing key requires account — the account it
-// signs for (the key name is the team name, D24); a persona signing key
+// signs for (the key name is the role name, D24/D28); a persona signing key
 // requires both — its owner; other kinds refuse either. An operator op —
 // the deployment's permission template gates who reaches it.
 func (c *Client) ImportKey(name, kind, secret, account, user string) (Key, error) {
@@ -343,17 +343,18 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 }
 
 // MintEphemeral issues an ephemeral scoped user JWT signed by the named
-// team's signing key (role selection by declared configuration,
-// hq/02-DESIGN/agent.md D28). The caller generates its user keypair locally
-// and sends only the public half; no seed exists on either side of the wire
-// and the response is the JWT alone. Tags ride into the user claims for the
-// account's scoped-signer templates to resolve (NATS tag semantics:
-// lowercased, trimmed, deduplicated); they are inert without such a
-// template. ttl bounds the credential — the revocation propagation bound
-// (D22).
-func (c *Client) MintEphemeral(team, user, userPublicKey string, ttl time.Duration, tags []string) (string, error) {
+// role's signing key (role selection by declared configuration,
+// hq/02-DESIGN/agent.md D28 — a role is a declared signing key bound to
+// its account; a team is the account, the tenant). The caller generates
+// its user keypair locally and sends only the public half; no seed exists
+// on either side of the wire and the response is the JWT alone. Tags ride
+// into the user claims for the account's scoped-signer templates to
+// resolve (NATS tag semantics: lowercased, trimmed, deduplicated); they
+// are inert without such a template. ttl bounds the credential — the
+// revocation propagation bound (D22).
+func (c *Client) MintEphemeral(role, user, userPublicKey string, ttl time.Duration, tags []string) (string, error) {
 	body := map[string]any{
-		"team": team, "user": user, "user_public_key": userPublicKey,
+		"role": role, "user": user, "user_public_key": userPublicKey,
 		"ttl_seconds": int64(ttl / time.Second),
 	}
 	if len(tags) > 0 {

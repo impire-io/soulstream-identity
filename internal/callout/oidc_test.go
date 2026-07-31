@@ -35,7 +35,7 @@ func (a *auditBuf) String() string {
 }
 
 // oidcHarness: an issuer with the eyJ lane enabled against a live stub, two
-// declared teams (engineering, platform) in different accounts, and the
+// declared roles (engineering, platform) in different accounts, and the
 // AUTH signing key. Returns the issuer, the stub, the audit buffer, and
 // engineering's bound account.
 func oidcHarness(t *testing.T) (*Issuer, *oidcstub.Stub, *auditBuf, string) {
@@ -118,7 +118,7 @@ func TestOIDCAdmissionDelegatedAndAppOnly(t *testing.T) {
 		t.Fatalf("subject keyed on %q, want the oid (FR-007)", uc.Name)
 	}
 	if uc.IssuerAccount != engAccPub {
-		t.Fatalf("issuer account %q, want the team's binding %q", uc.IssuerAccount, engAccPub)
+		t.Fatalf("issuer account %q, want the role's binding %q", uc.IssuerAccount, engAccPub)
 	}
 	if !uc.HasEmptyPermissions() {
 		t.Fatal("claims-path JWT carries its own permissions")
@@ -126,7 +126,7 @@ func TestOIDCAdmissionDelegatedAndAppOnly(t *testing.T) {
 	if uc.Expires == 0 {
 		t.Fatal("claims-path JWT is unbounded")
 	}
-	for _, want := range []string{"lane=oidc", "team=engineering",
+	for _, want := range []string{"lane=oidc", "role=engineering",
 		"subject=11111111-aaaa-bbbb-cccc-000000000001", "display=daan@example.com"} {
 		if !strings.Contains(audit.String(), want) {
 			t.Fatalf("attribution %q missing from audit:\n%s", want, audit.String())
@@ -171,8 +171,8 @@ func TestOIDCRefusalMatrix(t *testing.T) {
 		{"bad signature", func() (string, error) { return stub.TokenBadKey(stub.Claims(oid, "engineering")) }, "oidc token rejected"},
 		{"wrong issuer", func() (string, error) { return stub.Token(wrongIss) }, "different provider"},
 		{"roles absent", func() (string, error) { return stub.Token(stub.Claims(oid)) }, "no roles claim"},
-		{"no declared team", func() (string, error) { return stub.Token(stub.Claims(oid, "marketing")) }, "no declared team"},
-		{"ambiguous teams", func() (string, error) { return stub.Token(stub.Claims(oid, "engineering", "platform")) }, "ambiguous"},
+		{"no declared role", func() (string, error) { return stub.Token(stub.Claims(oid, "marketing")) }, "no declared role"},
+		{"ambiguous roles", func() (string, error) { return stub.Token(stub.Claims(oid, "engineering", "platform")) }, "ambiguous"},
 		{"alg HS256", func() (string, error) { return stub.TokenAlg("HS256", stub.Claims(oid, "engineering")) }, "oidc token rejected"},
 		{"alg none", func() (string, error) { return stub.TokenAlg("none", stub.Claims(oid, "engineering")) }, "oidc token rejected"},
 	}
@@ -251,16 +251,16 @@ func TestOIDCDispatchGuards(t *testing.T) {
 		t.Fatalf("sit_ lane regressed: %s", resp.Error)
 	}
 
-	// The issuer's own AUTH signing key is infrastructure, never a team.
+	// The issuer's own AUTH signing key is infrastructure, never a role.
 	oidcIss, stub, audit, _ := oidcHarness(t)
 	tok, err := stub.Token(stub.Claims("55555555-aaaa-bbbb-cccc-000000000005", "auth/issuer"))
 	if err != nil {
 		t.Fatalf("token: %v", err)
 	}
 	if resp := respondWith(t, oidcIss, tok); resp.Error == "" {
-		t.Fatal("the AUTH signing key was resolved as a team")
+		t.Fatal("the AUTH signing key was resolved as a role")
 	}
-	if !strings.Contains(audit.String(), "no declared team") {
+	if !strings.Contains(audit.String(), "no declared role") {
 		t.Fatalf("auth-key role value not treated as undeclared:\n%s", audit.String())
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/impire-io/soulidentity/internal/vault"
 )
 
-// harness: an issuer over a MemStore vault (a team bound to its account —
+// harness: an issuer over a MemStore vault (a role bound to its account —
 // the authorize source, D25 — plus the AUTH signing key) and a token store
 // with one live token naming an identity in the bound account.
 func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string, string) {
@@ -27,7 +27,7 @@ func harness(t *testing.T, calloutSeed string) (*Issuer, *MemTokenStore, string,
 	roleKP, _ := nkeys.CreateAccount()
 	roleSeed, _ := roleKP.Seed()
 	if _, err := v.Import("acme", vault.KindNATSAccountSigningKey, string(roleSeed), accPub, ""); err != nil {
-		t.Fatalf("import team: %v", err)
+		t.Fatalf("import role: %v", err)
 	}
 	authAccKP, _ := nkeys.CreateAccount()
 	authAccPub, _ := authAccKP.PublicKey()
