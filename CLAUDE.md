@@ -38,6 +38,6 @@ Conventions:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/001-entra-oidc-backend/plan.md` (spec, research, data model,
-contracts, and quickstart live beside it).
+`specs/002-embed-seam/plan.md` (spec, research, data model, contracts,
+and quickstart live beside it).
 <!-- SPECKIT END -->
