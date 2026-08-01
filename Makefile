@@ -9,10 +9,11 @@ LDFLAGS := -X github.com/impire-io/soulidentity/internal/version.Version=$(VERSI
 fmt:
 	gofmt -w .
 
-# Keep go.mod/go.sum honest — the consumer-position e2e module too.
+# Keep go.mod/go.sum honest — the consumer-position e2e modules too.
 tidy:
 	go mod tidy
 	cd e2e && go mod tidy
+	cd e2e/embedgate && go mod tidy
 
 build:
 	go build ./...
@@ -24,10 +25,12 @@ build:
 test:
 	go test ./...
 	cd e2e && go test ./...
+	cd e2e/embedgate && go test ./...
 
 lint:
 	golangci-lint run
 	cd e2e && golangci-lint run
+	cd e2e/embedgate && golangci-lint run
 
 # The one gate to run before every commit: everything green.
 check: fmt tidy build test lint

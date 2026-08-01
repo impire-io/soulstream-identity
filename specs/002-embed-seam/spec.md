@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-embed-seam`
 **Created**: 2026-08-01
-**Status**: Draft
+**Status**: Implemented (landed 2026-08-01 — journey 0018)
 **Input**: User description: "The embed seam (D29): a public `embed` package that lifts the daemon's serve assembly behind `Run(ctx context.Context, o Options) error` so a consumer process can host the identity plane — service, optional callout issuer, vault — in-process against `*nats.Conn`s it already holds, with no `internal/` imports. Options are value-only; no internal type crosses the boundary; custody unchanged (D13); `client/` remains the consumer surface while `embed/` is the operator surface; provisioning stays on the wire through `client/`. `cmd/soulidentity serve` becomes the first consumer of `embed`. Acceptance: the operator-mode callout e2e shape passes with the plane assembled through `embed.Run`, driven from a consumer-position module with zero internal/ imports."
 
 ## User Scenarios & Testing *(mandatory)*

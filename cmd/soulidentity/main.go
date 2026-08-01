@@ -19,14 +19,12 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 	"github.com/synadia-io/orbit.go/natscontext"
 
 	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/callout"
+	"github.com/impire-io/soulidentity/embed"
 	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/vault"
 	"github.com/impire-io/soulidentity/internal/version"
 )
 
@@ -239,92 +237,45 @@ func cmdServe(args []string, errw io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return fmt.Errorf("jetstream: %w", err)
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: *bucket})
-	if err != nil {
-		return fmt.Errorf("kv bucket %s: %w", *bucket, err)
-	}
-	v, err := vault.New(vault.NewKVStore(kv), firstSeed)
-	if err != nil {
-		return err
-	}
-	// Fail fast on a mis-supplied first key: never double-seal a vault.
-	if err := v.Verify(); err != nil {
-		return err
-	}
-	log := slog.New(slog.NewTextHandler(errw, nil))
 
 	// The callout half: a second connection, authenticated in the AUTH
 	// account (D21); its presence enables the issuer and the token ops.
-	var svcOpts []service.Option
 	var ncCallout *nats.Conn
 	if *calloutCreds != "" || *calloutContext != "" {
 		if *authAccount == "" {
 			return errors.New("callout needs --auth-account (the AUTH account public key)")
 		}
-		tokensKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: *tokenBucket})
-		if err != nil {
-			return fmt.Errorf("kv bucket %s: %w", *tokenBucket, err)
-		}
-		store := callout.NewKVTokenStore(tokensKV)
-		svcOpts = append(svcOpts, service.WithCallout(store, *authKey, *authAccount))
-
 		calloutCF := connFlags{context: calloutContext, url: cf.url, creds: calloutCreds}
 		ncCallout, err = calloutCF.connect()
 		if err != nil {
 			return fmt.Errorf("callout connection: %w", err)
 		}
 		defer ncCallout.Close()
-
-		// The OIDC lane (D23): both issuer and audience present enables it;
-		// discovery runs now and fails closed. Either absent, eyJ credentials
-		// refuse early in the issuer.
-		issuerURL := stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER")
-		audience := stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE")
-		var issOpts []callout.IssuerOption
-		if issuerURL != "" || audience != "" {
-			if issuerURL == "" || audience == "" {
-				return errors.New("the oidc lane needs both --oidc-issuer and --oidc-audience")
-			}
-			oidcVal, err := callout.NewOIDCValidator(ctx, issuerURL, audience)
-			if err != nil {
-				return err
-			}
-			issOpts = append(issOpts, callout.WithOIDC(oidcVal))
-		}
-		issuer, err := callout.NewIssuer(v, store, *authKey, *calloutTTL, calloutSeed, log, issOpts...)
-		if err != nil {
-			return err
-		}
-		if _, err := issuer.Start(ncCallout); err != nil {
-			return err
-		}
-		log.Info("callout issuer serving", "subject", callout.Subject,
-			"token_bucket", *tokenBucket, "ttl", calloutTTL.String(),
-			"sealed_requests", calloutSeed != "", "oidc", issuerURL != "")
 	}
 
-	if err := service.ValidatePrefix(*cf.prefix); err != nil {
+	// One assembly, two entrypoints (D29): the daemon parses flags and
+	// owns its connections; the plane itself is the public embed package.
+	err = embed.Run(ctx, embed.Options{
+		Conn:         nc,
+		CalloutConn:  ncCallout,
+		VaultBucket:  *bucket,
+		TokenBucket:  *tokenBucket,
+		FirstKey:     firstSeed,
+		SurfaceKey:   surfaceSeed,
+		CalloutKey:   calloutSeed,
+		AuthKeyName:  *authKey,
+		AuthAccount:  *authAccount,
+		CalloutTTL:   *calloutTTL,
+		Prefix:       *cf.prefix,
+		OIDCIssuer:   stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER"),
+		OIDCAudience: stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
+		Logger:       slog.New(slog.NewTextHandler(errw, nil)),
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
-	svcOpts = append(svcOpts, service.WithPrefix(*cf.prefix))
-	svc, err := service.New(v, surfaceSeed, log, svcOpts...)
-	if err != nil {
-		return err
-	}
-	sub, err := svc.Start(nc)
-	if err != nil {
-		return err
-	}
-	// The root is logged deliberately: a consumer with a mismatched prefix
-	// sees timeouts, and this line is where the mismatch is diagnosed.
-	log.Info("service serving", "subjects", svc.Root()+".>", "bucket", *bucket,
-		"version", version.Version)
-	<-ctx.Done()
-	_ = sub.Drain()
+	// The daemon owns its connections (the embed contract drains only its
+	// own subscriptions): drain them on the way out, as before.
 	if ncCallout != nil {
 		_ = ncCallout.Drain()
 	}

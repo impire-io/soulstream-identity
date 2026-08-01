@@ -47,5 +47,6 @@ Options ──validate──▶ constructed ──Start──▶ serving ──c
 - **serving**: vault verified, KV buckets ensured, service surface
   subscribed; with callout — token store bound, issuer subscribed,
   "callout issuer serving" + "service serving" logged.
-- **draining**: service and issuer subscriptions drained; the caller's
-  connections untouched (R2).
+- **draining**: service and issuer subscriptions drained and
+  flush-confirmed (the server has processed the unsubscribes before Run
+  returns); the caller's connections untouched (R2).

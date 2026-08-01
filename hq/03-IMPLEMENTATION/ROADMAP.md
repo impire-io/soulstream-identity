@@ -4,7 +4,20 @@
 SoulIdentity is; this document decides what gets built first and behind which
 gate.*
 
-## Where we are (2026-07-31)
+## Where we are (2026-08-01)
+
+**The embed seam — D29, M2's second consumer-proven addition** ([journey
+0018](../04-JOURNEY/0018-the-embed-seam.md), D29 in
+[`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), feature
+`specs/002-embed-seam/`): soulnode's single-binary-composition research
+measured the wall — provisioning is public through `client/`, but the
+serve assembly lived only in `cmdServe`, forcing embedding consumers onto
+the module-namespace dodge. The public `embed` package now carries it:
+`Run(ctx, Options)`, value-only options, custody unchanged, provisioning
+still wire-only; `serve` is the seam's first consumer. Compiler-grade
+proof: `e2e/embedgate/` (module path outside the namespace — `internal/`
+imports cannot compile) runs the M4 admission shape through `embed.Run`
+[measured]. Existing gates unchanged and green.
 
 **The ephemeral role-named mint — D28, M2's first consumer-proven
 addition** ([journey 0017](../04-JOURNEY/0017-role-selection-by-name.md),
@@ -151,7 +164,10 @@ arrive over the NATS surface).
    it may add only what those consumers prove missing. First such addition,
    landed 2026-07-31: soulrealm's fleet proved the ephemeral role-named
    tagged mint missing (soulidentity#1) — `mint.ephemeral`, D28 (journey
-   [0017](../04-JOURNEY/0017-role-selection-by-name.md)).
+   [0017](../04-JOURNEY/0017-role-selection-by-name.md)). Second, landed
+   2026-08-01: soulnode's composition research proved the serve-side embed
+   seam missing — the public `embed` package, D29 (journey
+   [0018](../04-JOURNEY/0018-the-embed-seam.md)).
 3. ✅ **M3 — the NATS-native rebuild** (shipped 2026-07-28,
    [journey 0007](../04-JOURNEY/0007-m3-the-nats-native-rebuild.md)). The
    agent's contract served over NATS request/reply with xkey-sealed

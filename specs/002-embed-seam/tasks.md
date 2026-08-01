@@ -22,7 +22,7 @@ configured (plan.md Technical Context).*
 
 **Purpose**: the public package both stories serve through.
 
-- [ ] T001 Create `embed/embed.go`: package doc (operator surface vs
+- [X] T001 Create `embed/embed.go`: package doc (operator surface vs
       `client/`'s consumer surface, custody note), `Options` struct
       exactly as `contracts/embed.md` defines it, defaults application
       (`VaultBucket`, `TokenBucket`, `AuthKeyName`, `CalloutTTL`,
@@ -30,7 +30,7 @@ configured (plan.md Technical Context).*
       1–4 (required fields; prefix via `service.ValidatePrefix`; callout
       both-halves — including callout-dependent options refused without
       `CalloutConn`; OIDC both-or-neither).
-- [ ] T002 Implement `Run(ctx, Options) error` in `embed/embed.go`: the
+- [X] T002 Implement `Run(ctx, Options) error` in `embed/embed.go`: the
       `cmdServe` lift — JetStream handle, KV buckets
       (`CreateOrUpdateKeyValue`), `vault.New` + `Verify` (fail fast,
       data-model rule 5), token store + `service.New(WithCallout…,
@@ -55,13 +55,13 @@ the plane through `embed.Run` with zero `internal/` imports.
 itself rejects any `internal/` import (module path
 `soulidentity.invalid/embedgate`), and the M4 admission shape passes.
 
-- [ ] T003 [US1] Create `e2e/embedgate/go.mod`: module
+- [X] T003 [US1] Create `e2e/embedgate/go.mod`: module
       `soulidentity.invalid/embedgate` (research R3), go 1.26.2, requires
       soulidentity v0.0.0 + nats-server/nats.go/jwt/nkeys at the repo's
       pinned versions, `replace github.com/impire-io/soulidentity =>
       ../..`, header comment stating the compiler-proof purpose and
       never-published nature.
-- [ ] T004 [US1] Write the ceremony half of
+- [X] T004 [US1] Write the ceremony half of
       `e2e/embedgate/gate_test.go`: operator-mode embedded server with
       auth callout (operator/SYS/AUTH/APP accounts, AUTH
       `EnableExternalAuthorization` + `AllowedAccounts` + xkey, APP
@@ -69,7 +69,7 @@ itself rejects any `internal/` import (module path
       bootstrap creds (service, ops, issuer user), the three curve
       seeds — the `client/callout_e2e_test.go` ceremony re-expressed
       consumer-side (research R4; soulnode's rig is the fourth prior).
-- [ ] T005 [US1] Write the scenario half of `e2e/embedgate/gate_test.go`:
+- [X] T005 [US1] Write the scenario half of `e2e/embedgate/gate_test.go`:
       start `embed.Run` in a goroutine (service + callout conns from the
       ceremony), wait for readiness (status answer), then through public
       `client`: import the two signing keys, create a `sit_` token, mint
@@ -77,7 +77,7 @@ itself rejects any `internal/` import (module path
       attributed), invalid-token refusal, revoked-token refusal, `callout
       REFUSED` in the captured audit log; cancel ctx and assert `Run`
       returns with subscriptions drained (spec US1 scenarios 1–3).
-- [ ] T006 [US1] Wire `e2e/embedgate` into the `Makefile`: `tidy`,
+- [X] T006 [US1] Wire `e2e/embedgate` into the `Makefile`: `tidy`,
       `test`, and `lint` each gain the `cd e2e/embedgate && …` line
       beside the existing `e2e` lines (plan structure decision).
 
@@ -93,13 +93,13 @@ compiler-proven from consumer position.
 **Independent Test**: the existing e2e gates (M3 sealed surface, M4
 callout, M2 cross-service) pass without modification.
 
-- [ ] T007 [US2] Refactor `cmdServe` in `cmd/soulidentity/main.go` to
+- [X] T007 [US2] Refactor `cmdServe` in `cmd/soulidentity/main.go` to
       parse flags/env and own its connections exactly as today, then
       delegate assembly to `embed.Run(ctx, …)`; keep the daemon's
       post-Run connection drains (research R2); map misconfiguration
       errors where flags add information (research R5); delete the
       now-duplicated assembly code.
-- [ ] T008 [US2] Run the unchanged existing suites — `go test ./...` and
+- [X] T008 [US2] Run the unchanged existing suites — `go test ./...` and
       `cd e2e && go test ./...` — and confirm the M3/M4/M2 gates pass
       with zero test edits (spec SC-002); fix parity gaps in
       `embed/embed.go` if any surface.
@@ -110,12 +110,12 @@ callout, M2 cross-service) pass without modification.
 
 ## Phase 5: Polish & Landing
 
-- [ ] T009 [P] Verify `specs/002-embed-seam/quickstart.md` against the
+- [X] T009 [P] Verify `specs/002-embed-seam/quickstart.md` against the
       real surface (import alias, field names, make line) and correct any
       drift; confirm package doc reads plainly (constitution IV).
-- [ ] T010 Full gate: `make check` (fmt, tidy — now three modules, build,
+- [X] T010 Full gate: `make check` (fmt, tidy — now three modules, build,
       test, lint) all green, nothing skipped (spec SC-004).
-- [ ] T011 Landing duties in the same merge (how-we-work): journey
+- [X] T011 Landing duties in the same merge (how-we-work): journey
       episode via `/journey-log` (D29 + this feature; evidence tags;
       reversal condition), `hq/03-IMPLEMENTATION/ROADMAP.md` M2 entry
       updated (second consumer served — the embed seam), design

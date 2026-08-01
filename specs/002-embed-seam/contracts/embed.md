@@ -47,7 +47,10 @@ only).
    (constitution I; D13 as amended).
 2. **Ownership**: the caller's connections are never dialed, closed, or
    drained by the package; on shutdown the package drains only its own
-   subscriptions (research R2).
+   subscriptions and flush-confirms the server processed the
+   unsubscribes before returning — "Run returned" means "the surface is
+   silent" (research R2; strengthened during implementation when the
+   gate's first run showed `Drain()` alone only *initiates*).
 3. **Parity**: behavior equals the daemon's — same vault verification
    fail-fast, same callout enablement rule, same admission / refusal /
    revocation semantics, same "service serving" / "callout issuer

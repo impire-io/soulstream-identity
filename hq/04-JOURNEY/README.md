@@ -15,7 +15,23 @@ because a refuted assumption is as load-bearing as the shipped code.
 > [`../00-GENESIS/how-we-work.md`](../00-GENESIS/how-we-work.md); the
 > numbering and index are enforced by `internal/hqlint`.
 
-## Where things stand (2026-07-31)
+## Where things stand (2026-08-01)
+
+**The embed seam — D29, M2's second consumer-proven addition** ([episode
+0018](0018-the-embed-seam.md); D29 in
+[`../02-DESIGN/agent.md`](../02-DESIGN/agent.md), feature
+`specs/002-embed-seam/`): soulnode's composition research measured the
+wall — provisioning is public, the serve assembly was `cmdServe`-only,
+and two consumers had already ridden the module-namespace dodge to reach
+`internal/`. The public `embed` package now exposes the one seam:
+`Run(ctx, Options)`, value-only options, custody unchanged (D13),
+provisioning still wire-only; the daemon is its first consumer (one
+assembly, two entrypoints). The proof is compiler-grade:
+`e2e/embedgate/`'s module path sits outside the repo namespace, so an
+`internal/` import cannot compile; the gate runs the M4 admission shape
+through `embed.Run` [measured]. A drain lesson strengthened the contract:
+`Run` flush-confirms its unsubscribes, so returned means silent. Existing
+gates unchanged, uncached-green [measured].
 
 **Role selection by declared name — D28, the first consumer-proven
 M2 addition** ([episode 0017](0017-role-selection-by-name.md); D28 in
@@ -225,3 +241,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0015 | [The vault is the directory: ephemeral users, keys on first touch](0015-the-vault-is-the-directory.md) |
 | 0016 | [One noun: persona](0016-one-noun-persona.md) |
 | 0017 | [Role selection by declared name: the ephemeral mint op](0017-role-selection-by-name.md) |
+| 0018 | [The embed seam: the serve assembly becomes public](0018-the-embed-seam.md) |
