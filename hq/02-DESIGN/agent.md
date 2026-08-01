@@ -518,6 +518,51 @@ declared names — needing per-request or computed role derivation
 policy, recorded as an issue) — reopens role selection a second time; any
 such answer stays declared configuration, never a token-record field.
 
+## D29 — The embed seam: the serve assembly becomes public
+
+*Decided 2026-08-01 at the operator's direction (soulnode's
+`single-binary-composition` research measured all three of its bars against
+this repo's serve path), M2's second consumer.* The serve-side assembly —
+vault, service, callout issuer, their wiring — exists only inside
+`cmdServe`; every consumer that wants the identity plane **in its own
+process** must either supervise the binary as a child or ride the
+module-namespace dodge (a module named under this repo's path so
+`internal/` imports become legal — soulstream's remote-mcp-node experiment
+did it, soulnode's rig had to repeat it, and both recorded the necessity as
+a finding [measured, soulnode's topic]). A distribution whose constitution
+forbids `internal/` reaches cannot exist until this seam does. The seam:
+
+- **One public package, `embed`**: `Run(ctx context.Context, o Options)
+  error` — the lift of `cmdServe` behind a value-only options struct
+  (service and optional callout `*nats.Conn`s, bucket names, the three
+  `SX…` seeds as strings, `AuthKeyName`/`AuthAccount`, callout TTL,
+  prefix, OIDC issuer/audience, `*slog.Logger`). `Run` blocks until ctx
+  ends, then drains — the same lifecycle the daemon has. No internal type
+  crosses the boundary: `vault.Vault`, `callout.Store`, `OIDCValidator`
+  stay internal; the package constructs them from the strings.
+- **Custody unchanged** (D13 as amended): the seeds remain
+  deployment-supplied configuration — `embed` accepts the same strings the
+  environment variables carry and writes no key material anywhere. An
+  embedding process holds them exactly as the daemon's environment did:
+  same principal set, same trust class [mechanism-argument].
+- **Two surfaces, named**: `client/` remains the *consumer* surface (who
+  calls the plane); `embed/` is the *operator* surface (who hosts it). The
+  binary's `serve` becomes the first consumer of `embed` — one assembly,
+  two entrypoints, no drift by construction.
+- **Provisioning stays on the wire**: no in-process admin API arrives with
+  this seam. An embedding process provisions through `client/` over its
+  own connection, as any operator does — soulnode's rig proved the whole
+  founding ceremony (key imports, token, sentinel) through the public
+  client in-process [measured, its topic journal]; the sealed surface and
+  its ACL story (D15, D25) stay the only mutation path.
+
+**Reversal condition**: an embedding consumer that genuinely needs
+config-by-*type* — its own token store, its own validator — cannot be
+served by string options (observable: a consumer forking `embed` or
+re-riding the namespace dodge to inject a type, recorded as an issue);
+that reopens this decision toward exposing the internal interfaces
+deliberately, never by accident.
+
 ## Milestone 1 — the walking skeleton
 
 - `internal/vault` — file-backed keystore: NATS nkey seeds (account signing
