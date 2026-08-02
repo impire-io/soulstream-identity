@@ -123,8 +123,9 @@ the execution order: M4 (auth callout), then M2 (consumers wire in).
 ([journey 0001](../04-JOURNEY/0001-genesis-and-the-walking-skeleton.md)):
 vault, registry, agent over a Unix socket, mint-from-scoped-signing-keys, the
 `client` package with `NATSOption`, and the end-to-end proof against an
-operator-mode NATS server [measured]. No release tagged yet; the module is
-consumable at `main`.
+operator-mode NATS server [measured]. First release tagged 2026-08-02:
+`v0.1.0`, cut for soulfold's consumer-position pin — the trigger the
+release-pipeline item named.
 
 **The identity-plane re-centering — 2026-07-28**
 ([journey 0002](../04-JOURNEY/0002-the-identity-plane-re-centering.md),
@@ -214,7 +215,10 @@ arrive over the NATS surface).
 6. **Later**: sealing keys (D9 — unwrap-once, waits on Soulstream sealed
    topics build), further storage backends (OS keychain, Vault transit — D10),
    release pipeline (goreleaser + tag-triggered release, the archivist
-   pattern) when the first external consumer wants a pinned version.
+   pattern). The pipeline's trigger half-fired 2026-08-02: soulfold became
+   the first external consumer wanting a pinned version, answered with the
+   signed tag `v0.1.0` (a Go module pin needs no binary); the goreleaser
+   pipeline still waits for the first consumer of the *binary*.
 
 ## Open research questions (before their milestones)
 

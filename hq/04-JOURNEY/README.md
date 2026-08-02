@@ -231,8 +231,9 @@ the server, no seed ever in the client process [measured]. The design is
 twelve numbered decisions in [`../02-DESIGN/agent.md`](../02-DESIGN/agent.md);
 the plan is [`../03-IMPLEMENTATION/ROADMAP.md`](../03-IMPLEMENTATION/ROADMAP.md)
 (execution order M3 → M4 → M2: the NATS-native rebuild, then auth callout as
-the front door, then consumers wire in over the NATS surface). No release is
-tagged yet; open questions before their milestones (NGS callout
+the front door, then consumers wire in over the NATS surface). The first
+release tag arrived 2026-08-02 — `v0.1.0`, for soulfold's pin; open
+questions before their milestones (NGS callout
 capabilities, the sentinel-credential flow, the first-key story, the
 claims-mapping shape, service round-trip latency) are named on the roadmap.
 
