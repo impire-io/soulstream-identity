@@ -4,7 +4,19 @@
 SoulIdentity is; this document decides what gets built first and behind which
 gate.*
 
-## Where we are (2026-08-01)
+## Where we are (2026-08-02)
+
+**The default IdP is a sibling — soulfold, the refusal holds** ([journey
+0019](../04-JOURNEY/0019-soulfold-the-default-idp.md)): the vision's
+"not an identity provider" refusal was tested by the operator's
+default-IdP question and held — the passkey-first OIDC provider
+deployments get out of the box becomes the sibling project **soulfold**
+(`github.com/impire-io/soulfold`, NATS-native, JetStream-KV-backed,
+embeddable), which the callout issuer treats identically to Entra
+through the D23 seam: issuer URL, JWKS, D24's roles-claim rule, no
+side-channel, no shared store. Nothing changes in this repo now; named,
+not built: D23 multi-issuer dispatch when a deployment runs soulfold
+beside a second external issuer.
 
 **The embed seam — D29, M2's second consumer-proven addition** ([journey
 0018](../04-JOURNEY/0018-the-embed-seam.md), D29 in

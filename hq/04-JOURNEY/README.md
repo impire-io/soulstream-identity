@@ -15,7 +15,23 @@ because a refuted assumption is as load-bearing as the shipped code.
 > [`../00-GENESIS/how-we-work.md`](../00-GENESIS/how-we-work.md); the
 > numbering and index are enforced by `internal/hqlint`.
 
-## Where things stand (2026-08-01)
+## Where things stand (2026-08-02)
+
+**The default IdP is a sibling — soulfold, the refusal holds**
+([episode 0019](0019-soulfold-the-default-idp.md)): the operator's
+default-IdP question — should SoulIdentity, bearing the name, also be
+the passkey-first OIDC provider deployments get out of the box — was
+answered by holding the vision's refusal: identity truth stays in the
+deployment's IAM, and the default IAM becomes **soulfold**
+(`github.com/impire-io/soulfold`), a NATS-native (JetStream KV),
+embeddable, passkey-first OIDC provider the callout issuer treats
+identically to Entra — the D23 seam only, no side-channel, no shared
+store, no precedence [mechanism-argument]. "Default" is distribution
+wiring (`--oidc-issuer`), replaceable by any OIDC provider by config.
+Pocket-id itself was ruled out as the bundle not for being Node (it is
+Go since v1) but for being an application with an SQL store, not an
+embeddable library. Named, not built: D23 multi-issuer dispatch for
+deployments running soulfold beside a second issuer.
 
 **The embed seam — D29, M2's second consumer-proven addition** ([episode
 0018](0018-the-embed-seam.md); D29 in
@@ -242,3 +258,4 @@ claims-mapping shape, service round-trip latency) are named on the roadmap.
 | 0016 | [One noun: persona](0016-one-noun-persona.md) |
 | 0017 | [Role selection by declared name: the ephemeral mint op](0017-role-selection-by-name.md) |
 | 0018 | [The embed seam: the serve assembly becomes public](0018-the-embed-seam.md) |
+| 0019 | [Soulfold: the default IdP is a sibling, the refusal holds](0019-soulfold-the-default-idp.md) |

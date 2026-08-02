@@ -246,6 +246,13 @@ policy source.
 
 ## Not yet decided (pending research)
 
+- **Multi-issuer dispatch**: D23 pins one OIDC issuer. The ecosystem's
+  default IdP is the sibling project soulfold ([journey
+  0019](../04-JOURNEY/0019-soulfold-the-default-idp.md)) — reached
+  through this same seam, indistinguishable from Entra by design — so a
+  deployment running soulfold beside a second external issuer needs
+  dispatch across issuers. Named, not built (constitution III); the
+  first such deployment re-opens it.
 - **NGS**: whether a Synadia-managed server exposes callout configuration
   at all (`ngs-capabilities`) — the open half of D11's reversal condition.
   Blocked on operator access to the Synadia Cloud account (the account

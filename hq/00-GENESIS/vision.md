@@ -120,7 +120,10 @@ sequencing in
   we never become the thing that authenticates them, and identity truth —
   who exists, who belongs — stays in the deployment's IAM. Authentication
   backends (Entra/OIDC, LDAP, a KV of API tokens) plug into callout mode;
-  we implement none of them ourselves.
+  we implement none of them ourselves. Tested and held 2026-08-02
+  (journey 0019): the ecosystem's default IdP is the sibling project
+  soulfold — a standard OIDC issuer the callout issuer cannot
+  distinguish from Entra.
 - **A required component for local sessions.** Soulstream works without
   SoulIdentity — a creds file in hand connects directly (the bypass is
   first-class, not a workaround), and local sessions with local key files
