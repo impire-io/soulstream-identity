@@ -1,4 +1,4 @@
-// The NATS KV backend: the vault's initial store (hq/02-DESIGN/agent.md D10).
+// The NATS KV backend: the vault's initial store (../soul-hq/02-DESIGN/soulidentity/agent.md D10).
 // It moves sealed bytes only — envelope encryption happens above this seam, so
 // broker disks, replicas, and backups never hold a plaintext seed.
 

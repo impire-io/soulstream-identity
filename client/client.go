@@ -1,5 +1,5 @@
 // Package client talks to a SoulIdentity service over NATS request/reply with
-// xkey-sealed payloads (hq/02-DESIGN/nats-surface.md D16). The caller's NATS
+// xkey-sealed payloads (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D16). The caller's NATS
 // connection is the authentication: requests ride the caller's own subject
 // prefix, which the server only lets the rightful principal publish to (D15).
 //
@@ -70,7 +70,7 @@ type Client struct {
 type Option func(*Client)
 
 // WithServiceXKey pins the service's surface public key out of band instead
-// of trusting discovery over the broker (hq/02-DESIGN/nats-surface.md D16).
+// of trusting discovery over the broker (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D16).
 func WithServiceXKey(pub string) Option {
 	return func(c *Client) { c.servicePub = pub }
 }
@@ -328,7 +328,7 @@ func (c *Client) Mint(account, user string) (MintResult, error) {
 	return out, err
 }
 
-// MintCreds is the explicit custody escape (hq/02-DESIGN/agent.md D7): mint plus a creds
+// MintCreds is the explicit custody escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7): mint plus a creds
 // file whose seed leaves the vault. For self-custody onboarding and external
 // tools; the service logs it loudly.
 func (c *Client) MintCreds(account, user string) (MintResult, error) {
@@ -344,7 +344,7 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 
 // MintEphemeral issues an ephemeral scoped user JWT signed by the named
 // role's signing key (role selection by declared configuration,
-// hq/02-DESIGN/agent.md D28 — a role is a declared signing key bound to
+// ../soul-hq/02-DESIGN/soulidentity/agent.md D28 — a role is a declared signing key bound to
 // its account; a team is the account, the tenant). The caller generates
 // its user keypair locally and sends only the public half; no seed exists
 // on either side of the wire and the response is the JWT alone. Tags ride
@@ -390,7 +390,7 @@ type TokenResult struct {
 }
 
 // SentinelResult is a minted sentinel: a bearer, deny-all user JWT (and its
-// creds rendering) — public by design (hq/02-DESIGN/auth-callout.md D19).
+// creds rendering) — public by design (../soul-hq/02-DESIGN/soulidentity/auth-callout.md D19).
 type SentinelResult struct {
 	JWT   string `json:"jwt"`
 	Creds string `json:"creds"`

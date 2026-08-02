@@ -35,7 +35,7 @@ const (
 )
 
 // TestM3GateAgainstOperatorModeServer is the NATS-native rebuild's end-to-end
-// proof [measured] — the M3 gate (hq/02-DESIGN/nats-surface.md, acceptance
+// proof [measured] — the M3 gate (../soul-hq/02-DESIGN/soulidentity/nats-surface.md, acceptance
 // criteria), re-proven on the D25 shape (no registry; the ACL gates the op
 // tail, the bindings gate the data): a NATS server in operator mode with
 // JetStream, the service on its sealed surface, a scoped signing key whose

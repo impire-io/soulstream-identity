@@ -1,6 +1,6 @@
 // Package vault is the service's keystore: named secrets sealed at rest,
 // signatures out, seeds never. Records are sealed to the deployment-supplied
-// first key (hq/02-DESIGN/agent.md D13) before they reach the storage backend
+// first key (../soul-hq/02-DESIGN/soulidentity/agent.md D13) before they reach the storage backend
 // (D10) — the backend only ever holds ciphertext. The API surface above this
 // package exposes public keys and signing operations only; the sole exception
 // is ExportSeed, the explicit custody escape used by credential export (D7).
@@ -24,7 +24,7 @@ type Kind string
 
 const (
 	// KindNATSAccountSigningKey is an account (signing) nkey seed ("SA…"): mints
-	// user JWTs. Scoped signing keys are the recommended shape (hq/02-DESIGN/agent.md D5).
+	// user JWTs. Scoped signing keys are the recommended shape (../soul-hq/02-DESIGN/soulidentity/agent.md D5).
 	KindNATSAccountSigningKey Kind = "nats-account-signing-key"
 	// KindNATSUserKey is a user nkey seed ("SU…"): the minted principals' keys.
 	KindNATSUserKey Kind = "nats-user-key"
@@ -34,12 +34,12 @@ const (
 )
 
 // Entry is a vault key as the API shows it: never the secret. The binding
-// fields are the authorization source (hq/02-DESIGN/nats-surface.md D25):
+// fields are the authorization source (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D25):
 // for an account signing key, Account is the account it signs for —
-// the role's binding (hq/02-DESIGN/auth-callout.md D24, D28 — a role is a
+// the role's binding (../soul-hq/02-DESIGN/soulidentity/auth-callout.md D24, D28 — a role is a
 // declared signing key; a team is the account, the tenant); for a
 // persona signing key, (Account, User) is the owner principal that may sign
-// with it (hq/02-DESIGN/agent.md D6 as amended); both empty for user keys.
+// with it (../soul-hq/02-DESIGN/soulidentity/agent.md D6 as amended); both empty for user keys.
 type Entry struct {
 	Name      string `json:"name"`
 	Kind      Kind   `json:"kind"`
@@ -54,7 +54,7 @@ var (
 	ErrNotFound = errors.New("vault: no such key")
 )
 
-// Store is the storage backend seam (hq/02-DESIGN/agent.md D10): it moves
+// Store is the storage backend seam (../soul-hq/02-DESIGN/soulidentity/agent.md D10): it moves
 // opaque sealed bytes and never sees plaintext. NATS KV is the initial
 // backend; MemStore serves tests.
 type Store interface {
@@ -87,7 +87,7 @@ type Vault struct {
 }
 
 // New opens a vault over store, unsealing with the deployment-supplied first
-// key ("SX…" curve seed — hq/02-DESIGN/agent.md D13).
+// key ("SX…" curve seed — ../soul-hq/02-DESIGN/soulidentity/agent.md D13).
 func New(store Store, firstKeySeed string) (*Vault, error) {
 	if store == nil {
 		return nil, errors.New("vault: a store is required")
@@ -104,7 +104,7 @@ func New(store Store, firstKeySeed string) (*Vault, error) {
 }
 
 // Verify fails fast when the store already holds records the first key cannot
-// open — a mis-supplied seed must not double-seal a vault (hq/02-DESIGN/nats-surface.md).
+// open — a mis-supplied seed must not double-seal a vault (../soul-hq/02-DESIGN/soulidentity/nats-surface.md).
 func (v *Vault) Verify() error {
 	names, err := v.store.Names()
 	if err != nil {
@@ -224,7 +224,7 @@ func (v *Vault) Import(name string, kind Kind, secret, account, user string) (En
 // GeneratePersonaKey creates a persona signing key inside the vault, bound
 // to its owner (account, user), or returns the existing entry when name is
 // already present with the same owner — the materialize-on-first-use path
-// (hq/02-DESIGN/nats-surface.md D26): no per-user provisioning act exists;
+// (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D26): no per-user provisioning act exists;
 // the seed is generated in-vault and never leaves except through
 // ExportSeed. A name held by another owner or kind refuses.
 func (v *Vault) GeneratePersonaKey(name, account, user string) (Entry, error) {
@@ -379,7 +379,7 @@ func (v *Vault) KeyPair(name string) (nkeys.KeyPair, error) {
 	return kp, nil
 }
 
-// ExportSeed returns the raw secret: THE custody escape (hq/02-DESIGN/agent.md D7), used
+// ExportSeed returns the raw secret: THE custody escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7), used
 // only by explicit credential export. Callers surface the export loudly.
 func (v *Vault) ExportSeed(name string) (string, error) {
 	s, err := v.load(name)

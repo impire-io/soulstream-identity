@@ -22,7 +22,7 @@ import (
 )
 
 // TestM4GateAgainstOperatorModeServer is auth callout's end-to-end proof
-// [measured] — the M4 gate (hq/02-DESIGN/auth-callout.md): SoulIdentity as
+// [measured] — the M4 gate (../soul-hq/02-DESIGN/soulidentity/auth-callout.md): SoulIdentity as
 // the callout issuer on a dedicated AUTH account (D21, xkey-sealed
 // requests), a client holding only a sentinel creds file and an API token
 // (D19), admitted with server-enforced scoped permissions and attributable

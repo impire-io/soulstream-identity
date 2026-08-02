@@ -1,4 +1,4 @@
-// The M2 cross-service gate (hq/03-IMPLEMENTATION/ROADMAP.md, milestone 2):
+// The M2 cross-service gate (../soul-hq/03-IMPLEMENTATION/ROADMAP.md, milestone 2):
 // a Soulstream record signed through the running SoulIdentity service
 // verifies in a real realm [measured]. This module sits in the consumer
 // position the cycle guard requires — it imports BOTH soulidentity and

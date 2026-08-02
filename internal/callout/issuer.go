@@ -1,4 +1,4 @@
-// The issuer: the mint with a callout trigger (hq/02-DESIGN/auth-callout.md
+// The issuer: the mint with a callout trigger (../soul-hq/02-DESIGN/soulidentity/auth-callout.md
 // D20). It validates the presented token (D22 stage 1), authorizes against
 // the vault's role bindings (stage 2 — D24, D25), and answers the server
 // with a scoped ephemeral user JWT for the server-assigned key. No response

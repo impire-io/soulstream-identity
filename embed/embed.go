@@ -6,7 +6,7 @@
 // Think of it as the difference between renting the service a room and
 // letting it live in your house: the plane behaves identically either way,
 // and the daemon itself is this package's first consumer (one assembly, two
-// entrypoints — D29 in hq/02-DESIGN/agent.md).
+// entrypoints — D29 in ../soul-hq/02-DESIGN/soulidentity/agent.md).
 //
 // The other public package, client, is the consumer surface: who *calls*
 // the plane. This one is for who *hosts* it. Provisioning (key imports,

@@ -1,4 +1,4 @@
-// Package service is SoulIdentity's NATS surface (hq/02-DESIGN/nats-surface.md):
+// Package service is SoulIdentity's NATS surface (../soul-hq/02-DESIGN/soulidentity/nats-surface.md):
 // request/reply on soulidentity.<account>.<user>.<op> with xkey-sealed payloads
 // (D16), plus the two open ops (status, xkey — D14). The principal is read off
 // the subject and is trustworthy because the server's publish-permission
@@ -79,7 +79,7 @@ type Service struct {
 	surfacePub string
 	log        *slog.Logger
 
-	// The callout half (hq/02-DESIGN/auth-callout.md): the token store the
+	// The callout half (../soul-hq/02-DESIGN/soulidentity/auth-callout.md): the token store the
 	// tokens.* ops manage, the vault name of the AUTH signing key
 	// sentinel.mint signs with, and the AUTH account public key the sentinel
 	// declares as issuer_account (a signing-key-signed user JWT must name
@@ -217,7 +217,7 @@ type mintResponse struct {
 	JWT           string `json:"jwt"`
 	UserPublicKey string `json:"user_public_key"`
 	// Creds is present only when the caller explicitly asked for the custody
-	// escape (hq/02-DESIGN/agent.md D7).
+	// escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7).
 	Creds string `json:"creds,omitempty"`
 }
 

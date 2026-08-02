@@ -1,5 +1,5 @@
 // Package callout is SoulIdentity as the NATS auth-callout issuer
-// (hq/02-DESIGN/auth-callout.md): the front door through which external
+// (../soul-hq/02-DESIGN/soulidentity/auth-callout.md): the front door through which external
 // external subjects are represented inside NATS (D12's second lane). The token store
 // here is the credential store half of D22 — records name a principal and
 // carry no policy; policy stays in the registry.

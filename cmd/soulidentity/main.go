@@ -1,6 +1,6 @@
 // Command soulidentity runs and talks to the SoulIdentity service: the
 // identity plane of the Soulstream ecosystem, served over NATS
-// (hq/02-DESIGN/nats-surface.md). `serve` is the daemon; every other
+// (../soul-hq/02-DESIGN/soulidentity/nats-surface.md). `serve` is the daemon; every other
 // subcommand is a NATS client of the service's sealed surface, speaking as
 // the principal named by --as.
 package main
@@ -63,7 +63,7 @@ prefer the environment (D13). The callout connection (--callout-creds /
 enables the issuer and the token/sentinel ops.
 Kinds: nats-account-signing-key | nats-user-key | persona-signing-key
 --creds prints a creds file: the seed LEAVES the vault — the explicit custody
-escape (hq/02-DESIGN/agent.md D7) and the way onto the bypass lane (D12).
+escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7) and the way onto the bypass lane (D12).
 `
 
 func main() {

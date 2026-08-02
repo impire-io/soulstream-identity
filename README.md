@@ -25,11 +25,11 @@ the path) or bring an external token and arrive through auth callout
 (the next milestone).
 
 The design — the decisions and their reasoning — lives in
-[hq/02-DESIGN/](hq/02-DESIGN/README.md). **How this project is run
-lives in [hq/](hq/README.md)** — vision and constitution
-([hq/00-GENESIS/](hq/00-GENESIS/README.md)), the roadmap
-([hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md)), and the
-journey log ([hq/04-JOURNEY/](hq/04-JOURNEY/README.md)); agents start at
+[../soul-hq/02-DESIGN/soulidentity/](../soul-hq/02-DESIGN/soulidentity/README.md). **How this project is run
+lives in [../soul-hq/](../soul-hq/README.md)** — vision and constitution
+([../soul-hq/00-GENESIS/](../soul-hq/00-GENESIS/README.md)), the roadmap
+([../soul-hq/03-IMPLEMENTATION/ROADMAP.md](../soul-hq/03-IMPLEMENTATION/ROADMAP.md)), and the
+journey log ([../soul-hq/04-JOURNEY/](../soul-hq/04-JOURNEY/README.md)); agents start at
 [AGENTS.md](AGENTS.md).
 
 ## Quick start
@@ -107,7 +107,7 @@ receives a TTL-bounded scoped identity, fully attributable in the audit
 log, with revocation propagating at the JWT's expiry. Both milestones are
 proven end to end against embedded NATS servers in operator mode; creds-file
 connections stay natively verified with the issuer out of the path. See
-[hq/03-IMPLEMENTATION/ROADMAP.md](hq/03-IMPLEMENTATION/ROADMAP.md) for what
+[../soul-hq/03-IMPLEMENTATION/ROADMAP.md](../soul-hq/03-IMPLEMENTATION/ROADMAP.md) for what
 comes next (consumers wiring in; Entra/OIDC as callout configuration;
 attestation issuance, sealing keys).
 
