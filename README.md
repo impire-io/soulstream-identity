@@ -113,4 +113,8 @@ attestation issuance, sealing keys).
 
 ## License
 
-MIT.
+[Fair-code](https://faircode.io), under the [Sustainable Use License](LICENSE) —
+free to use, modify, and self-host for internal or non-commercial use; offering
+it to others as a paid product or service requires an agreement — see
+[impire.io/license](https://impire.io/license/). Versions released before this
+change remain MIT.
