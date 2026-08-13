@@ -8,7 +8,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // harness: an issuer over a MemStore vault (a role bound to its account —

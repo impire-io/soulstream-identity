@@ -16,7 +16,7 @@ non-negotiables.
    lifecycle, the journey duty). Decisions are held against these.
 2. `../soul-hq/04-JOURNEY/README.md` — where things stand + the episode index.
 3. `../soul-hq/03-IMPLEMENTATION/ROADMAP.md` — the milestones and their gates.
-4. `../soul-hq/02-DESIGN/soulidentity/` — the design docs and their numbered decisions (D1–D13
+4. `../soul-hq/02-DESIGN/soulstream-identity/` — the design docs and their numbered decisions (D1–D13
    and D27–D28 in `agent.md`, D14–D18 and D25–D26 in `nats-surface.md`,
    D19–D24 in `auth-callout.md`); code comments cite these D-numbers. One noun:
    **persona** is the represented subject, **principal** the server-proven

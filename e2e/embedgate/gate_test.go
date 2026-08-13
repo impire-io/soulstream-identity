@@ -26,8 +26,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/embed"
+	"github.com/impire-io/soulstream-identity/client"
+	"github.com/impire-io/soulstream-identity/embed"
 )
 
 // syncBuffer captures the plane's audit log for assertions.
@@ -187,7 +187,7 @@ func provision(t *testing.T) *ceremony {
 	serviceJWT, serviceSeed := userJWTSeed("service", appKP)
 	opsJWT, opsSeed := userJWTSeed("ops", appKP)
 	issuerClaims := jwt.NewUserClaims(issuerUserPub)
-	issuerClaims.Name = "soulidentity-issuer"
+	issuerClaims.Name = "soulstream-identity-issuer"
 	issuerJWT, err := issuerClaims.Encode(authKP)
 	if err != nil {
 		t.Fatalf("issuer user: %v", err)

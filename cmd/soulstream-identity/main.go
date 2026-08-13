@@ -1,6 +1,6 @@
-// Command soulidentity runs and talks to the SoulIdentity service: the
+// Command soulstream-identity runs and talks to the SoulIdentity service: the
 // identity plane of the Soulstream ecosystem, served over NATS
-// (../soul-hq/02-DESIGN/soulidentity/nats-surface.md). `serve` is the daemon; every other
+// (../soul-hq/02-DESIGN/soulstream-identity/nats-surface.md). `serve` is the daemon; every other
 // subcommand is a NATS client of the service's sealed surface, speaking as
 // the principal named by --as.
 package main
@@ -22,31 +22,31 @@ import (
 	"github.com/nats-io/nkeys"
 	"github.com/synadia-io/orbit.go/natscontext"
 
-	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/embed"
-	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/version"
+	"github.com/impire-io/soulstream-identity/client"
+	"github.com/impire-io/soulstream-identity/embed"
+	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/version"
 )
 
-const usage = `soulidentity — the identity plane, served over NATS
+const usage = `soulstream-identity — the identity plane, served over NATS
 
 Usage:
-  soulidentity serve    [conn] [--bucket NAME]                       run the service
+  soulstream-identity serve    [conn] [--bucket NAME]                       run the service
                         [--callout-creds F | --callout-context C]    …as callout issuer (M4):
                         [--auth-key NAME] [--token-bucket NAME] [--callout-ttl DUR]
-  soulidentity keygen                              mint an xkey seed (seed on stdout)
-  soulidentity status   [conn]                     probe the service
-  soulidentity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
+  soulstream-identity keygen                              mint an xkey seed (seed on stdout)
+  soulstream-identity status   [conn]                     probe the service
+  soulstream-identity key import   [conn] --as A/U --name N --kind K (--seed-file F | --seed-stdin)
                             [--account A] [--user U]   the binding (role / persona owner, D24/D25)
-  soulidentity key ls       [conn] --as A/U
-  soulidentity mint         [conn] --as A/U [--account A --user U] [--creds]
+  soulstream-identity key ls       [conn] --as A/U
+  soulstream-identity mint         [conn] --as A/U [--account A --user U] [--creds]
                             | --role R --user-key U... --ttl DUR [--user U] [--tag k:v]...
                               ephemeral, role by name (D28): your key, JWT only
-  soulidentity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
-  soulidentity token ls     [conn] --as A/U
-  soulidentity token revoke [conn] --as A/U --digest D
-  soulidentity sentinel     [conn] --as A/U        mint the sentinel creds (stdout)
-  soulidentity version
+  soulstream-identity token create [conn] --as A/U --account A --user U [--label L] [--ttl DUR]
+  soulstream-identity token ls     [conn] --as A/U
+  soulstream-identity token revoke [conn] --as A/U --digest D
+  soulstream-identity sentinel     [conn] --as A/U        mint the sentinel creds (stdout)
+  soulstream-identity version
 
 Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
 --as is the principal (<account-public-key>/<user>) the connection is
@@ -63,7 +63,7 @@ prefer the environment (D13). The callout connection (--callout-creds /
 enables the issuer and the token/sentinel ops.
 Kinds: nats-account-signing-key | nats-user-key | persona-signing-key
 --creds prints a creds file: the seed LEAVES the vault — the explicit custody
-escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7) and the way onto the bypass lane (D12).
+escape (../soul-hq/02-DESIGN/soulstream-identity/agent.md D7) and the way onto the bypass lane (D12).
 `
 
 func main() {
@@ -97,11 +97,11 @@ func run(args []string, out, errw io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(out, usage)
 	default:
-		fmt.Fprintf(errw, "soulidentity: unknown command %q\n\n%s", cmd, usage)
+		fmt.Fprintf(errw, "soulstream-identity: unknown command %q\n\n%s", cmd, usage)
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(errw, "soulidentity:", err)
+		fmt.Fprintln(errw, "soulstream-identity:", err)
 		return 1
 	}
 	return 0
@@ -126,7 +126,7 @@ func addConnFlags(fs *flag.FlagSet) connFlags {
 
 func (c connFlags) connect() (*nats.Conn, error) {
 	if *c.context != "" {
-		nc, _, err := natscontext.Connect(*c.context, nats.Name("soulidentity"))
+		nc, _, err := natscontext.Connect(*c.context, nats.Name("soulstream-identity"))
 		if err != nil {
 			return nil, fmt.Errorf("context %q: %w", *c.context, err)
 		}
@@ -136,7 +136,7 @@ func (c connFlags) connect() (*nats.Conn, error) {
 	if url == "" {
 		url = nats.DefaultURL
 	}
-	opts := []nats.Option{nats.Name("soulidentity")}
+	opts := []nats.Option{nats.Name("soulstream-identity")}
 	if *c.creds != "" {
 		opts = append(opts, nats.UserCredentials(*c.creds))
 	}

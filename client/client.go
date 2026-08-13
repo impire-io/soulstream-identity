@@ -1,5 +1,5 @@
 // Package client talks to a SoulIdentity service over NATS request/reply with
-// xkey-sealed payloads (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D16). The caller's NATS
+// xkey-sealed payloads (../soul-hq/02-DESIGN/soulstream-identity/nats-surface.md D16). The caller's NATS
 // connection is the authentication: requests ride the caller's own subject
 // prefix, which the server only lets the rightful principal publish to (D15).
 //
@@ -23,7 +23,7 @@ import (
 // Segment is the service's fixed token in the subject space; the full root
 // is <prefix>.<Segment>, where the prefix is the deployment's shared
 // ecosystem namespace, empty by default (D14 as amended, journey 0011).
-const Segment = "soulidentity"
+const Segment = "identity"
 
 // Key is a vault entry as the service shows it: never the secret. The
 // binding fields are the authorization source (D25): for an account signing
@@ -70,7 +70,7 @@ type Client struct {
 type Option func(*Client)
 
 // WithServiceXKey pins the service's surface public key out of band instead
-// of trusting discovery over the broker (../soul-hq/02-DESIGN/soulidentity/nats-surface.md D16).
+// of trusting discovery over the broker (../soul-hq/02-DESIGN/soulstream-identity/nats-surface.md D16).
 func WithServiceXKey(pub string) Option {
 	return func(c *Client) { c.servicePub = pub }
 }
@@ -122,13 +122,13 @@ func (c *Client) serviceXKey() (string, error) {
 	}
 	msg, err := c.nc.Request(c.root+".xkey", nil, c.timeout)
 	if err != nil {
-		return "", fmt.Errorf("soulidentity: service discovery: %w", err)
+		return "", fmt.Errorf("soulstream-identity: service discovery: %w", err)
 	}
 	var x struct {
 		XKey string `json:"xkey"`
 	}
 	if err := json.Unmarshal(msg.Data, &x); err != nil || x.XKey == "" {
-		return "", errors.New("soulidentity: service discovery returned no xkey")
+		return "", errors.New("soulstream-identity: service discovery returned no xkey")
 	}
 	c.servicePub = x.XKey
 	return c.servicePub, nil
@@ -142,29 +142,29 @@ func (c *Client) call(op string, in, out any) error {
 	}
 	eph, err := nkeys.CreateCurveKeys()
 	if err != nil {
-		return fmt.Errorf("soulidentity: ephemeral key: %w", err)
+		return fmt.Errorf("soulstream-identity: ephemeral key: %w", err)
 	}
 	ephPub, err := eph.PublicKey()
 	if err != nil {
-		return fmt.Errorf("soulidentity: ephemeral key: %w", err)
+		return fmt.Errorf("soulstream-identity: ephemeral key: %w", err)
 	}
 	plain, err := json.Marshal(in)
 	if err != nil {
-		return fmt.Errorf("soulidentity: encode request: %w", err)
+		return fmt.Errorf("soulstream-identity: encode request: %w", err)
 	}
 	sealed, err := eph.Seal(plain, servicePub)
 	if err != nil {
-		return fmt.Errorf("soulidentity: seal request: %w", err)
+		return fmt.Errorf("soulstream-identity: seal request: %w", err)
 	}
 	req, err := json.Marshal(envelope{XKey: ephPub, Data: sealed})
 	if err != nil {
-		return fmt.Errorf("soulidentity: encode envelope: %w", err)
+		return fmt.Errorf("soulstream-identity: encode envelope: %w", err)
 	}
 
 	subject := strings.Join([]string{c.root, c.account, c.user, op}, ".")
 	msg, err := c.nc.Request(subject, req, c.timeout)
 	if err != nil {
-		return fmt.Errorf("soulidentity: %s: %w", op, err)
+		return fmt.Errorf("soulstream-identity: %s: %w", op, err)
 	}
 
 	var env envelope
@@ -172,25 +172,25 @@ func (c *Client) call(op string, in, out any) error {
 		// Not an envelope: a plaintext refusal from before the secure channel.
 		var er errorResponse
 		if json.Unmarshal(msg.Data, &er) == nil && er.Error != "" {
-			return fmt.Errorf("soulidentity: %s", er.Error)
+			return fmt.Errorf("soulstream-identity: %s", er.Error)
 		}
-		return fmt.Errorf("soulidentity: %s: unreadable reply", op)
+		return fmt.Errorf("soulstream-identity: %s: unreadable reply", op)
 	}
 	// Replies are opened against the pinned/discovered service key — a reply
 	// sealed by anything else does not open.
 	opened, err := eph.Open(env.Data, servicePub)
 	if err != nil {
-		return fmt.Errorf("soulidentity: %s: reply cannot be unsealed: %w", op, err)
+		return fmt.Errorf("soulstream-identity: %s: reply cannot be unsealed: %w", op, err)
 	}
 	var er errorResponse
 	if json.Unmarshal(opened, &er) == nil && er.Error != "" {
-		return fmt.Errorf("soulidentity: %s", er.Error)
+		return fmt.Errorf("soulstream-identity: %s", er.Error)
 	}
 	if out == nil {
 		return nil
 	}
 	if err := json.Unmarshal(opened, out); err != nil {
-		return fmt.Errorf("soulidentity: decode response: %w", err)
+		return fmt.Errorf("soulstream-identity: decode response: %w", err)
 	}
 	return nil
 }
@@ -200,13 +200,13 @@ func (c *Client) call(op string, in, out any) error {
 func (c *Client) Status() (string, error) {
 	msg, err := c.nc.Request(c.root+".status", nil, c.timeout)
 	if err != nil {
-		return "", fmt.Errorf("soulidentity: status: %w", err)
+		return "", fmt.Errorf("soulstream-identity: status: %w", err)
 	}
 	var out struct {
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(msg.Data, &out); err != nil {
-		return "", fmt.Errorf("soulidentity: decode status: %w", err)
+		return "", fmt.Errorf("soulstream-identity: decode status: %w", err)
 	}
 	return out.Version, nil
 }
@@ -292,10 +292,10 @@ func (c *Client) PersonaSigner(persona string) (*PersonaSigner, error) {
 		return nil, err
 	}
 	if out.PublicKey == "" {
-		return nil, errors.New("soulidentity: keys.public returned no public key")
+		return nil, errors.New("soulstream-identity: keys.public returned no public key")
 	}
 	if out.Account != c.account || out.User != c.user {
-		return nil, fmt.Errorf("soulidentity: persona %q is owned by another principal — this client signs only with its own key", persona)
+		return nil, fmt.Errorf("soulstream-identity: persona %q is owned by another principal — this client signs only with its own key", persona)
 	}
 	return &PersonaSigner{c: c, persona: persona, pub: out.PublicKey}, nil
 }
@@ -313,7 +313,7 @@ func (s *PersonaSigner) Sign(canonical []byte) (string, error) {
 		return "", err
 	}
 	if sig == "" {
-		return "", errors.New("soulidentity: service returned an empty signature")
+		return "", errors.New("soulstream-identity: service returned an empty signature")
 	}
 	return sig, nil
 }
@@ -328,7 +328,7 @@ func (c *Client) Mint(account, user string) (MintResult, error) {
 	return out, err
 }
 
-// MintCreds is the explicit custody escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7): mint plus a creds
+// MintCreds is the explicit custody escape (../soul-hq/02-DESIGN/soulstream-identity/agent.md D7): mint plus a creds
 // file whose seed leaves the vault. For self-custody onboarding and external
 // tools; the service logs it loudly.
 func (c *Client) MintCreds(account, user string) (MintResult, error) {
@@ -337,14 +337,14 @@ func (c *Client) MintCreds(account, user string) (MintResult, error) {
 		"account": account, "user": user, "export_creds": true,
 	}, &out)
 	if err == nil && out.Creds == "" {
-		return out, errors.New("soulidentity: service did not return creds")
+		return out, errors.New("soulstream-identity: service did not return creds")
 	}
 	return out, err
 }
 
 // MintEphemeral issues an ephemeral scoped user JWT signed by the named
 // role's signing key (role selection by declared configuration,
-// ../soul-hq/02-DESIGN/soulidentity/agent.md D28 — a role is a declared signing key bound to
+// ../soul-hq/02-DESIGN/soulstream-identity/agent.md D28 — a role is a declared signing key bound to
 // its account; a team is the account, the tenant). The caller generates
 // its user keypair locally and sends only the public half; no seed exists
 // on either side of the wire and the response is the JWT alone. Tags ride
@@ -390,7 +390,7 @@ type TokenResult struct {
 }
 
 // SentinelResult is a minted sentinel: a bearer, deny-all user JWT (and its
-// creds rendering) — public by design (../soul-hq/02-DESIGN/soulidentity/auth-callout.md D19).
+// creds rendering) — public by design (../soul-hq/02-DESIGN/soulstream-identity/auth-callout.md D19).
 type SentinelResult struct {
 	JWT   string `json:"jwt"`
 	Creds string `json:"creds"`

@@ -1,15 +1,15 @@
 // The compiler-proof consumer-position gate for the embed seam (002, D29):
-// this module's path sits OUTSIDE github.com/impire-io/soulidentity, so the
+// this module's path sits OUTSIDE github.com/impire-io/soulstream-identity, so the
 // Go toolchain itself refuses any internal/ import — SC-001's zero-internal
 // claim is checked by the compiler, not by review. The .invalid TLD is the
 // RFC-reserved never-resolves name: this module is never tagged, never
 // published, and exists only to run `go test` here.
-module soulidentity.invalid/embedgate
+module soulstream-identity.invalid/embedgate
 
 go 1.26.2
 
 require (
-	github.com/impire-io/soulidentity v0.0.0
+	github.com/impire-io/soulstream-identity v0.0.0
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats-server/v2 v2.14.3
 	github.com/nats-io/nats.go v1.52.0
@@ -30,4 +30,4 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/impire-io/soulidentity => ../..
+replace github.com/impire-io/soulstream-identity => ../..

@@ -1,4 +1,4 @@
-// The callout-management ops (../soul-hq/02-DESIGN/soulidentity/auth-callout.md D21/D22): API
+// The callout-management ops (../soul-hq/02-DESIGN/soulstream-identity/auth-callout.md D21/D22): API
 // tokens issued and revoked over the sealed surface, and the sentinel minted
 // from the AUTH signing key the vault holds. All operator ops — the
 // deployment's permission template gates who reaches them (D25).
@@ -13,7 +13,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/callout"
 )
 
 type tokenCreateRequest struct {

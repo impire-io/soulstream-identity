@@ -21,9 +21,9 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/client"
+	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // The M3 e2e runs under a shared ecosystem prefix (D14 as amended, journey
@@ -35,7 +35,7 @@ const (
 )
 
 // TestM3GateAgainstOperatorModeServer is the NATS-native rebuild's end-to-end
-// proof [measured] — the M3 gate (../soul-hq/02-DESIGN/soulidentity/nats-surface.md, acceptance
+// proof [measured] — the M3 gate (../soul-hq/02-DESIGN/soulstream-identity/nats-surface.md, acceptance
 // criteria), re-proven on the D25 shape (no registry; the ACL gates the op
 // tail, the bindings gate the data): a NATS server in operator mode with
 // JetStream, the service on its sealed surface, a scoped signing key whose
@@ -92,7 +92,7 @@ func TestM3GateAgainstOperatorModeServer(t *testing.T) {
 	// in the template.
 	scope := jwt.NewUserScope()
 	scope.Key = askPub
-	scope.Role = "soulidentity-user"
+	scope.Role = "soulstream-identity-user"
 	scope.Template = jwt.UserPermissionLimits{
 		Permissions: jwt.Permissions{
 			Pub: jwt.Permission{Allow: jwt.StringList{

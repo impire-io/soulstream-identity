@@ -10,13 +10,13 @@ are ephemeral, and no per-persona registry exists anywhere (D25).
 Connections are creds-file bypass or auth callout — SoulIdentity is the
 callout issuer (API tokens + Entra/OIDC, D19–D24); the vault rides NATS
 KV, sealed to a deployment-supplied first key.
-Module `github.com/impire-io/soulidentity`, Go 1.26.
+Module `github.com/impire-io/soulstream-identity`, Go 1.26.
 
 **How this project is run lives in `../soul-hq/` — read [`AGENTS.md`](AGENTS.md)
 first** (orientation order + the non-negotiables), then hold decisions against
 `../soul-hq/00-GENESIS/`. Where things stand: `../soul-hq/04-JOURNEY/README.md`. The plan:
 `../soul-hq/03-IMPLEMENTATION/ROADMAP.md`. The design with its D-numbered decisions
-(cited from code comments): `../soul-hq/02-DESIGN/soulidentity/` (D1–D13 and D27–D29 in
+(cited from code comments): `../soul-hq/02-DESIGN/soulstream-identity/` (D1–D13 and D27–D29 in
 `agent.md`, D14–D18 and D25–D26 in `nats-surface.md`, D19–D24 in
 `auth-callout.md`).
 

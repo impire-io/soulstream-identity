@@ -3,7 +3,7 @@
 # Stamp the binary with a real version for local builds; goreleaser sets the tag
 # on release. Override with `make build VERSION=x.y.z`.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/impire-io/soulidentity/internal/version.Version=$(VERSION)
+LDFLAGS := -X github.com/impire-io/soulstream-identity/internal/version.Version=$(VERSION)
 
 # Format all Go source (gofmt); golangci-lint's formatters also cover goimports.
 fmt:

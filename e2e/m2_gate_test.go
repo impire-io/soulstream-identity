@@ -1,9 +1,9 @@
 // The M2 cross-service gate (../soul-hq/03-IMPLEMENTATION/ROADMAP.md, milestone 2):
 // a Soulstream record signed through the running SoulIdentity service
 // verifies in a real realm [measured]. This module sits in the consumer
-// position the cycle guard requires — it imports BOTH soulidentity and
+// position the cycle guard requires — it imports BOTH soulstream-identity and
 // soulstream and wires soulstream's identity.Signer seam to
-// soulidentity's PersonaSigner, which satisfies it structurally (neither
+// soulstream-identity's PersonaSigner, which satisfies it structurally (neither
 // core module imports the other).
 package e2e_test
 
@@ -20,13 +20,13 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/client"
+	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 
-	"github.com/impire-io/soulstream/identity"
-	"github.com/impire-io/soulstream/realm"
-	"github.com/impire-io/soulstream/topic"
+	"github.com/impire-io/soulstream-core/identity"
+	"github.com/impire-io/soulstream-core/realm"
+	"github.com/impire-io/soulstream-core/topic"
 )
 
 // TestM2GateRecordSignedThroughTheServiceVerifiesInTheRealm runs the whole
@@ -271,7 +271,7 @@ jetstream { store_dir: %q }
 	// The trust path: the reader asks the IDENTITY PLANE for the author's
 	// public key — the vault that custodies the keys is the key directory
 	// (D26); no profile store, no out-of-band handoff. The keyring is
-	// soulstream's, built from soulidentity's answer: the two systems
+	// soulstream's, built from soulstream-identity's answer: the two systems
 	// meeting exactly at the seam.
 	authorPub, err := client.New(ncReader, accPub, "reader").PersonaPublicKey("daan")
 	if err != nil {

@@ -1,7 +1,7 @@
 // Package mint issues NATS user JWTs from account signing keys held in the
 // vault. The user key is generated inside the vault on first mint and reused
 // after; permissions are left to the signing key's scope, so the server — not
-// the minter — decides what the user may do (../soul-hq/02-DESIGN/soulidentity/agent.md D4, D5).
+// the minter — decides what the user may do (../soul-hq/02-DESIGN/soulstream-identity/agent.md D4, D5).
 package mint
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // UserKeyName is the vault name of the generated user key for a principal.
@@ -72,7 +72,7 @@ func Mint(v *vault.Vault, account, user string) (Result, error) {
 }
 
 // ForKey issues an ephemeral scoped user JWT for a caller-provided user
-// public key — the auth-callout path (../soul-hq/02-DESIGN/soulidentity/auth-callout.md D20),
+// public key — the auth-callout path (../soul-hq/02-DESIGN/soulstream-identity/auth-callout.md D20),
 // where the key is server-assigned and no vault key exists or is created.
 // The authorize stage is the target account's role binding (D22 as
 // amended, D25); ttl bounds the credential and is the revocation

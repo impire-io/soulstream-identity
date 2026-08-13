@@ -10,8 +10,8 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // harness: a service over a MemStore vault. There is no admin fixture and no

@@ -1,7 +1,7 @@
 # SoulIdentity
 
 **The identity plane for the
-[Soulstream](https://github.com/impire-io/soulstream) ecosystem.**
+[Soulstream](https://github.com/impire-io/soulstream-core) ecosystem.**
 SoulIdentity is the home of the **persona** — the ecosystem's one noun for
 a represented subject, human or agent alike: a service that holds the
 account signing keys, user keys, and persona record-signing keys, and
@@ -15,7 +15,7 @@ born on first encounter, every mint attributable.
 The surface is NATS-native — request/reply with xkey-sealed end-to-end
 encryption, the caller authenticated by its own NATS identity — and it is
 the only one. Operations live on the caller's own subject prefix
-(`[<prefix>.]soulidentity.<account>.<user>.<op>`, the optional prefix being
+(`[<prefix>.]soulstream-identity.<account>.<user>.<op>`, the optional prefix being
 the ecosystem-wide namespace shared by every soulstream component), and the
 claim is trustworthy because the server's publish permissions only let the
 rightful identity use it.
@@ -25,7 +25,7 @@ the path) or bring an external token and arrive through auth callout
 (the next milestone).
 
 The design — the decisions and their reasoning — lives in
-[../soul-hq/02-DESIGN/soulidentity/](../soul-hq/02-DESIGN/soulidentity/README.md). **How this project is run
+[../soul-hq/02-DESIGN/soulstream-identity/](../soul-hq/02-DESIGN/soulstream-identity/README.md). **How this project is run
 lives in [../soul-hq/](../soul-hq/README.md)** — vision and constitution
 ([../soul-hq/00-GENESIS/](../soul-hq/00-GENESIS/README.md)), the roadmap
 ([../soul-hq/03-IMPLEMENTATION/ROADMAP.md](../soul-hq/03-IMPLEMENTATION/ROADMAP.md)), and the
@@ -35,22 +35,22 @@ journey log ([../soul-hq/04-JOURNEY/](../soul-hq/04-JOURNEY/README.md)); agents 
 ## Quick start
 
 ```sh
-go install github.com/impire-io/soulidentity/cmd/soulidentity@latest
+go install github.com/impire-io/soulstream-identity/cmd/soulstream-identity@latest
 
 # Operator, once: mint the two xkeys into your secret store —
 # the vault's first key and the surface key (seed on stdout):
-export SOULIDENTITY_FIRST_KEY=$(soulidentity keygen)
-export SOULIDENTITY_SURFACE_KEY=$(soulidentity keygen)
+export SOULIDENTITY_FIRST_KEY=$(soulstream-identity keygen)
+export SOULIDENTITY_SURFACE_KEY=$(soulstream-identity keygen)
 
 # Run the service on its NATS connection (creds file = the bypass lane).
 # The vault lives in a KV bucket, sealed. There is no registry: who may
 # reach which op is your permission templates (the operator's creds carry
 # the management ops; represented users get sign.record + keys.public).
-soulidentity serve --creds-file ./service.creds &
+soulstream-identity serve --creds-file ./service.creds &
 
 # As the operator, declare the team: the account's (scoped) signing key,
 # bound to the account it signs for — the binding IS the declaration:
-soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
+soulstream-identity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
   --name acme --kind nats-account-signing-key --account AC...PUBKEY \
   --seed-file ./SA.nk
 
@@ -61,7 +61,7 @@ soulidentity key import --creds-file ./ops.creds --as AC...PUBKEY/ops \
 
 # Mint daan's creds (the explicit custody escape — self-custody onboarding);
 # the signing key resolves by the account's team binding:
-soulidentity mint --creds-file ./ops.creds --as AC...PUBKEY/ops \
+soulstream-identity mint --creds-file ./ops.creds --as AC...PUBKEY/ops \
   --account AC...PUBKEY --user daan --creds > daan.creds
 ```
 

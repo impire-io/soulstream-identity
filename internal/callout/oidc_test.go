@@ -12,8 +12,8 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/oidcstub"
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/oidcstub"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // auditBuf captures the issuer's audit log for reason assertions.
@@ -68,7 +68,7 @@ func oidcHarness(t *testing.T) (*Issuer, *oidcstub.Stub, *auditBuf, string) {
 		t.Fatalf("import auth key: %v", err)
 	}
 
-	stub, err := oidcstub.New("soulidentity-test-client")
+	stub, err := oidcstub.New("soulstream-identity-test-client")
 	if err != nil {
 		t.Fatalf("stub: %v", err)
 	}

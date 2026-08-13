@@ -1,4 +1,4 @@
-module github.com/impire-io/soulidentity
+module github.com/impire-io/soulstream-identity
 
 go 1.26.2
 

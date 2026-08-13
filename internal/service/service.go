@@ -1,5 +1,5 @@
-// Package service is SoulIdentity's NATS surface (../soul-hq/02-DESIGN/soulidentity/nats-surface.md):
-// request/reply on soulidentity.<account>.<user>.<op> with xkey-sealed payloads
+// Package service is SoulIdentity's NATS surface (../soul-hq/02-DESIGN/soulstream-identity/nats-surface.md):
+// request/reply on identity.<account>.<user>.<op> with xkey-sealed payloads
 // (D16), plus the two open ops (status, xkey — D14). The principal is read off
 // the subject and is trustworthy because the server's publish-permission
 // enforcement already proved it (D15); the same enforcement gates the op tail —
@@ -20,10 +20,10 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/mint"
-	"github.com/impire-io/soulidentity/internal/vault"
-	"github.com/impire-io/soulidentity/internal/version"
+	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/mint"
+	"github.com/impire-io/soulstream-identity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/version"
 )
 
 // Segment is the service's fixed token in the subject space. The full root
@@ -31,7 +31,7 @@ import (
 // ecosystem namespace, empty by default (D14 as amended, journey 0011) —
 // fixed per service so ecosystem components can share one prefix without
 // colliding.
-const Segment = "soulidentity"
+const Segment = "identity"
 
 // SubjectRoot computes the subject root for a deployment prefix ("" means
 // the bare service segment). The account token sits at position
@@ -79,7 +79,7 @@ type Service struct {
 	surfacePub string
 	log        *slog.Logger
 
-	// The callout half (../soul-hq/02-DESIGN/soulidentity/auth-callout.md): the token store the
+	// The callout half (../soul-hq/02-DESIGN/soulstream-identity/auth-callout.md): the token store the
 	// tokens.* ops manage, the vault name of the AUTH signing key
 	// sentinel.mint signs with, and the AUTH account public key the sentinel
 	// declares as issuer_account (a signing-key-signed user JWT must name
@@ -217,7 +217,7 @@ type mintResponse struct {
 	JWT           string `json:"jwt"`
 	UserPublicKey string `json:"user_public_key"`
 	// Creds is present only when the caller explicitly asked for the custody
-	// escape (../soul-hq/02-DESIGN/soulidentity/agent.md D7).
+	// escape (../soul-hq/02-DESIGN/soulstream-identity/agent.md D7).
 	Creds string `json:"creds,omitempty"`
 }
 

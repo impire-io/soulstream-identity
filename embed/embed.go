@@ -1,12 +1,12 @@
 // Package embed is the operator surface of the identity plane: it assembles
-// and runs what `soulidentity serve` runs — the sealed service surface and,
+// and runs what `soulstream-identity serve` runs — the sealed service surface and,
 // when the callout half is supplied, the callout issuer — inside the
 // caller's own process, against connections the caller already holds.
 //
 // Think of it as the difference between renting the service a room and
 // letting it live in your house: the plane behaves identically either way,
 // and the daemon itself is this package's first consumer (one assembly, two
-// entrypoints — D29 in ../soul-hq/02-DESIGN/soulidentity/agent.md).
+// entrypoints — D29 in ../soul-hq/02-DESIGN/soulstream-identity/agent.md).
 //
 // The other public package, client, is the consumer surface: who *calls*
 // the plane. This one is for who *hosts* it. Provisioning (key imports,
@@ -29,10 +29,10 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/vault"
-	"github.com/impire-io/soulidentity/internal/version"
+	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/vault"
+	"github.com/impire-io/soulstream-identity/internal/version"
 )
 
 // Options describes an assembly of the identity plane, by value. Zero

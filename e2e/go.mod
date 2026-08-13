@@ -1,14 +1,14 @@
 // The consumer-position proof module (ROADMAP M2, the cycle guard): it
-// imports BOTH soulidentity and soulstream, which neither module may do —
+// imports BOTH soulstream-identity and soulstream, which neither module may do —
 // consumers sit above both and wire the Signer seam together. This module
 // is never tagged or published; it exists to run the cross-service gate.
-module github.com/impire-io/soulidentity/e2e
+module github.com/impire-io/soulstream-identity/e2e
 
 go 1.26.2
 
 require (
-	github.com/impire-io/soulidentity v0.0.0
-	github.com/impire-io/soulstream v0.6.0
+	github.com/impire-io/soulstream-core v0.8.0
+	github.com/impire-io/soulstream-identity v0.0.0
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats-server/v2 v2.14.3
 	github.com/nats-io/nats.go v1.52.0
@@ -35,4 +35,4 @@ require (
 
 // The proof always runs against the working tree, not a released version:
 // it is part of this repository's quality gate.
-replace github.com/impire-io/soulidentity => ../
+replace github.com/impire-io/soulstream-identity => ../

@@ -14,15 +14,15 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
-	"github.com/impire-io/soulidentity/client"
-	"github.com/impire-io/soulidentity/internal/callout"
-	"github.com/impire-io/soulidentity/internal/oidcstub"
-	"github.com/impire-io/soulidentity/internal/service"
-	"github.com/impire-io/soulidentity/internal/vault"
+	"github.com/impire-io/soulstream-identity/client"
+	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/oidcstub"
+	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/vault"
 )
 
 // TestM4GateAgainstOperatorModeServer is auth callout's end-to-end proof
-// [measured] — the M4 gate (../soul-hq/02-DESIGN/soulidentity/auth-callout.md): SoulIdentity as
+// [measured] — the M4 gate (../soul-hq/02-DESIGN/soulstream-identity/auth-callout.md): SoulIdentity as
 // the callout issuer on a dedicated AUTH account (D21, xkey-sealed
 // requests), a client holding only a sentinel creds file and an API token
 // (D19), admitted with server-enforced scoped permissions and attributable
@@ -134,7 +134,7 @@ jetstream { store_dir: %q }
 	serviceCreds := issueUser(t, appKP, "service", nil)
 	adminCreds := issueUser(t, appKP, "ops", &jwt.Permissions{
 		Pub: jwt.Permission{Allow: jwt.StringList{
-			"soulidentity.status", "soulidentity.xkey", "soulidentity." + appPub + ".ops.>",
+			"identity.status", "identity.xkey", "identity." + appPub + ".ops.>",
 		}},
 		Sub: jwt.Permission{Allow: jwt.StringList{"_INBOX.>"}},
 	})
@@ -445,7 +445,7 @@ jetstream { store_dir: %q }
 	serviceCreds := issueUser(t, appKP, "service", nil)
 	adminCreds := issueUser(t, appKP, "ops", &jwt.Permissions{
 		Pub: jwt.Permission{Allow: jwt.StringList{
-			"soulidentity.status", "soulidentity.xkey", "soulidentity." + appPub + ".ops.>",
+			"identity.status", "identity.xkey", "identity." + appPub + ".ops.>",
 		}},
 		Sub: jwt.Permission{Allow: jwt.StringList{"_INBOX.>"}},
 	})
@@ -495,7 +495,7 @@ jetstream { store_dir: %q }
 	}
 	store := callout.NewKVTokenStore(tokensKV)
 
-	stub, err := oidcstub.New("soulidentity-e2e-app")
+	stub, err := oidcstub.New("soulstream-identity-e2e-app")
 	if err != nil {
 		t.Fatalf("oidc stub: %v", err)
 	}

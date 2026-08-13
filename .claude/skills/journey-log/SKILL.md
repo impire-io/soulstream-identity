@@ -20,7 +20,7 @@ research, designs, the roadmap, and the journey for the whole ecosystem live
 there, not in this repo.
 
 **Follow `../soul-hq/.claude/skills/journey-log/SKILL.md`** with the component
-preset to `soulidentity`, performing every file operation, the quality gate
+preset to `soulstream-identity`, performing every file operation, the quality gate
 (`make fmt && make test && make lint`), and the signed commit inside
 `../soul-hq` (never push — pushing stays a human act). If the sibling
 checkout is missing, stop and say so instead of improvising.
