@@ -98,8 +98,8 @@ persona key).
 
 ## Status
 
-Milestones 3 and 4 — the NATS-native service and the auth-callout front
-door. The sealed service surface on the caller's own subject prefix, the
+Milestones 3 and 4 — the NATS-native service and the auth-callout
+admission lane. The sealed service surface on the caller's own subject prefix, the
 vault on NATS KV with envelope encryption at rest, act-as enforced against
 the server-proven caller — and SoulIdentity as the callout issuer: an
 external client brings a public sentinel creds file plus an API token, and
