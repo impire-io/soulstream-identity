@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -211,8 +212,20 @@ func cmdServe(args []string, errw io.Writer) error {
 	calloutKey := fs.String("callout-key", "", "callout xkey seed (SX…); prefer SOULIDENTITY_CALLOUT_KEY")
 	oidcIssuer := fs.String("oidc-issuer", "", "OIDC issuer URL for the external-JWT lane (D23); or SOULIDENTITY_OIDC_ISSUER")
 	oidcAudience := fs.String("oidc-audience", "", "OIDC audience (the app registration's client ID); or SOULIDENTITY_OIDC_AUDIENCE")
+	grantsCatalog := fs.String("grants-catalog", "", "JSON file declaring outbound-grant resources (D34); enables the grants.* ops")
+	grantsBucket := fs.String("grants-bucket", "SOULIDENTITY_GRANTS", "KV bucket holding sealed grant custody (D31)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var grantResources []embed.GrantResource
+	if *grantsCatalog != "" {
+		raw, err := os.ReadFile(*grantsCatalog)
+		if err != nil {
+			return fmt.Errorf("grants catalog: %w", err)
+		}
+		if err := json.Unmarshal(raw, &grantResources); err != nil {
+			return fmt.Errorf("grants catalog %s: %w", *grantsCatalog, err)
+		}
 	}
 	firstSeed, err := seedFromFlagOrEnv(*firstKey, "SOULIDENTITY_FIRST_KEY")
 	if err != nil {
@@ -256,20 +269,22 @@ func cmdServe(args []string, errw io.Writer) error {
 	// One assembly, two entrypoints (D29): the daemon parses flags and
 	// owns its connections; the plane itself is the public embed package.
 	err = embed.Run(ctx, embed.Options{
-		Conn:         nc,
-		CalloutConn:  ncCallout,
-		VaultBucket:  *bucket,
-		TokenBucket:  *tokenBucket,
-		FirstKey:     firstSeed,
-		SurfaceKey:   surfaceSeed,
-		CalloutKey:   calloutSeed,
-		AuthKeyName:  *authKey,
-		AuthAccount:  *authAccount,
-		CalloutTTL:   *calloutTTL,
-		Prefix:       *cf.prefix,
-		OIDCIssuer:   stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER"),
-		OIDCAudience: stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
-		Logger:       slog.New(slog.NewTextHandler(errw, nil)),
+		Conn:           nc,
+		CalloutConn:    ncCallout,
+		VaultBucket:    *bucket,
+		TokenBucket:    *tokenBucket,
+		FirstKey:       firstSeed,
+		SurfaceKey:     surfaceSeed,
+		CalloutKey:     calloutSeed,
+		AuthKeyName:    *authKey,
+		AuthAccount:    *authAccount,
+		CalloutTTL:     *calloutTTL,
+		Prefix:         *cf.prefix,
+		OIDCIssuer:     stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER"),
+		OIDCAudience:   stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
+		GrantResources: grantResources,
+		GrantsBucket:   *grantsBucket,
+		Logger:         slog.New(slog.NewTextHandler(errw, nil)),
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err

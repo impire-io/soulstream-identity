@@ -21,6 +21,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/grants"
 	"github.com/impire-io/soulstream-identity/internal/mint"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
@@ -89,6 +90,11 @@ type Service struct {
 	authKeyName string
 	authAccount string
 
+	// The grants half (../soul-hq/02-DESIGN/soulstream-identity/grants.md):
+	// the outbound-credentials broker behind the grants.* ops. Nil = those
+	// ops refuse.
+	grants *grants.Broker
+
 	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
 	root string
 }
@@ -104,6 +110,14 @@ func WithCallout(store callout.Store, authKeyName, authAccount string) Option {
 		s.tokens = store
 		s.authKeyName = authKeyName
 		s.authAccount = authAccount
+	}
+}
+
+// WithGrants enables the outbound-grants ops (D30): broker is the custody
+// engine over the deployment's declared resources.
+func WithGrants(broker *grants.Broker) Option {
+	return func(s *Service) {
+		s.grants = broker
 	}
 }
 
@@ -396,6 +410,10 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 
 	case "tokens.create", "tokens.list", "tokens.revoke", "sentinel.mint":
 		return s.dispatchCallout(account, user, op, body)
+
+	case "grants.link.start", "grants.link.complete", "grants.access",
+		"grants.list", "grants.revoke":
+		return s.dispatchGrants(account, user, op, body)
 
 	default:
 		return nil, fmt.Errorf("service: unknown op %q", op)

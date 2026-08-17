@@ -30,6 +30,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/impire-io/soulstream-identity/internal/callout"
+	"github.com/impire-io/soulstream-identity/internal/grants"
 	"github.com/impire-io/soulstream-identity/internal/service"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
@@ -90,6 +91,27 @@ type Options struct {
 	// Logger receives the audit and serving lines. Default: text handler
 	// on stderr.
 	Logger *slog.Logger
+
+	// GrantResources declares the outbound-grant resources (D34 lane 2);
+	// non-empty enables the grants.* ops. Value-only, like everything
+	// here — no per-user configuration exists (D26's spirit).
+	GrantResources []GrantResource
+
+	// GrantsBucket is the KV bucket holding sealed grant custody (its own
+	// domain, D31 — never the key vault). Default "SOULIDENTITY_GRANTS".
+	GrantsBucket string
+}
+
+// GrantResource is one declared remote system, by value.
+type GrantResource struct {
+	Name         string
+	AuthURL      string
+	TokenURL     string
+	RevokeURL    string
+	ClientID     string
+	ClientSecret string
+	Scopes       []string
+	RedirectURI  string
 }
 
 // withDefaults returns a copy with the daemon's defaults applied.
@@ -102,6 +124,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.AuthKeyName == "" {
 		o.AuthKeyName = "auth/issuer"
+	}
+	if o.GrantsBucket == "" {
+		o.GrantsBucket = "SOULIDENTITY_GRANTS"
 	}
 	if o.CalloutTTL == 0 {
 		o.CalloutTTL = 15 * time.Minute
@@ -197,6 +222,31 @@ func Run(ctx context.Context, o Options) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// The grants half (D30/D31): enabled exactly when resources are
+	// declared; custody in its own sealed bucket, the same first key.
+	if len(o.GrantResources) > 0 {
+		grantsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.GrantsBucket})
+		if err != nil {
+			return fmt.Errorf("kv bucket %s: %w", o.GrantsBucket, err)
+		}
+		resources := make([]grants.Resource, len(o.GrantResources))
+		for i, r := range o.GrantResources {
+			resources[i] = grants.Resource(r)
+		}
+		broker, err := grants.New(grants.NewKVStore(grantsKV), o.FirstKey, resources, &grants.HTTPProvider{},
+			func(subject string) (string, error) {
+				e, err := v.Get(service.PersonaKeyPrefix + subject)
+				if err != nil {
+					return "", err
+				}
+				return e.PublicKey, nil
+			})
+		if err != nil {
+			return err
+		}
+		svcOpts = append(svcOpts, service.WithGrants(broker))
 	}
 
 	svcOpts = append(svcOpts, service.WithPrefix(o.Prefix))
