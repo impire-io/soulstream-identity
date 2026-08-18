@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
-
 	"github.com/impire-io/soulstream-core/realm"
 	"github.com/impire-io/soulstream-core/topic"
+	"github.com/nats-io/nats.go"
+
 	"github.com/impire-io/soulstream-identity/client"
 	"github.com/impire-io/soulstream-identity/embed"
 )
