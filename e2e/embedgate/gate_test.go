@@ -137,8 +137,11 @@ func provision(t *testing.T) *ceremony {
 				client.Segment + ".{{account-subject()}}.{{name()}}.keys.public",
 				client.Segment + ".{{account-subject()}}.{{name()}}.grants.>",
 				"$SYS.REQ.USER.INFO",
+				// The realm half, as the product's ceremony grants it: a
+				// represented user is a full realm member.
+				"SOULSTREAM.>", "$JS.API.>",
 			}},
-			Sub: jwt.Permission{Allow: []string{"_INBOX.>"}},
+			Sub: jwt.Permission{Allow: []string{"_INBOX.>", "SOULSTREAM.>"}},
 		},
 	}
 	appClaims.SigningKeys.AddScopedSigner(scope)
