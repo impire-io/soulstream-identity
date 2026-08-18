@@ -82,4 +82,11 @@ existing query parameters:
 
 Record the run's date and provider below when done:
 
-- [ ] SC-005 run: provider ______, date ______, by ______
+- [x] SC-005 run: provider **github** (GitHub App, "expire user
+      authorization tokens" on), date **2026-08-18**, by **Daan
+      (calmera)**. Observed: link → custody; first access served an
+      8-hour expiring token and `api.github.com/user` answered as the
+      linked account; second access **rotated the line** (D31's
+      discipline live against a real provider); revoke deleted custody
+      and the next access refused, the refusal audited. The Bar 2
+      residue from hq episode 0104 is closed.
