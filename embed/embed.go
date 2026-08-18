@@ -140,16 +140,20 @@ type GuardrailRule struct {
 	Effect string
 }
 
-// GrantResource is one declared remote system, by value.
+// GrantResource is one declared remote system, by value. The Exchange
+// pair declares a lane-3 resource (D34): served by RFC 8693 exchange of
+// the caller's own token — no linking, no custody.
 type GrantResource struct {
-	Name         string
-	AuthURL      string
-	TokenURL     string
-	RevokeURL    string
-	ClientID     string
-	ClientSecret string
-	Scopes       []string
-	RedirectURI  string
+	Name             string
+	AuthURL          string
+	TokenURL         string
+	RevokeURL        string
+	ClientID         string
+	ClientSecret     string
+	Scopes           []string
+	RedirectURI      string
+	ExchangeTokenURL string
+	ExchangeAudience string
 }
 
 // withDefaults returns a copy with the daemon's defaults applied.

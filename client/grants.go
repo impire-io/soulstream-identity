@@ -104,6 +104,18 @@ func (c *Client) GrantAccessOnBehalf(resource, subject string, d Delegation) (Gr
 	return out, err
 }
 
+// GrantAccessExchange serves a lane-3 resource (D34): the caller's own
+// bearer — presented, never retained — exchanged at the declared IdP
+// for a token scoped to the resource's audience. No linking ceremony
+// exists for exchange resources.
+func (c *Client) GrantAccessExchange(resource, subjectToken string) (GrantAccess, error) {
+	var out GrantAccess
+	err := c.call("grants.access", map[string]string{
+		"resource": resource, "subject_token": subjectToken,
+	}, &out)
+	return out, err
+}
+
 // Grants lists the caller's own custodied grants, public form.
 func (c *Client) Grants() ([]GrantInfo, error) {
 	var out struct {

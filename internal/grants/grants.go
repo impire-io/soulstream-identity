@@ -46,20 +46,38 @@ var (
 // no per-user configuration anywhere (D26's spirit).
 type Resource struct {
 	Name         string   `json:"name"`
-	AuthURL      string   `json:"auth_url"`
-	TokenURL     string   `json:"token_url"`
+	AuthURL      string   `json:"auth_url,omitempty"`
+	TokenURL     string   `json:"token_url,omitempty"`
 	RevokeURL    string   `json:"revoke_url,omitempty"`
 	ClientID     string   `json:"client_id"`
 	ClientSecret string   `json:"client_secret,omitempty"`
 	Scopes       []string `json:"scopes,omitempty"`
-	RedirectURI  string   `json:"redirect_uri"`
+	RedirectURI  string   `json:"redirect_uri,omitempty"`
+	// Lane 3 (D34): an exchange-capable IdP. Both set = the resource is
+	// served by RFC 8693 exchange of the caller's own token — no linking
+	// ceremony, no custody, nothing at rest.
+	ExchangeTokenURL string `json:"exchange_token_url,omitempty"`
+	ExchangeAudience string `json:"exchange_audience,omitempty"`
 }
+
+// IsExchange reports whether the resource rides lane 3.
+func (r Resource) IsExchange() bool { return r.ExchangeTokenURL != "" }
 
 // Validate refuses an unusable declaration by name.
 func (r Resource) Validate() error {
-	switch {
-	case r.Name == "":
+	if r.Name == "" {
 		return errors.New("grants: a resource needs a name")
+	}
+	if (r.ExchangeTokenURL == "") != (r.ExchangeAudience == "") {
+		return fmt.Errorf("grants: resource %s: exchange needs both exchange_token_url and exchange_audience", r.Name)
+	}
+	if r.IsExchange() {
+		if r.ClientID == "" {
+			return fmt.Errorf("grants: resource %s needs client_id", r.Name)
+		}
+		return nil
+	}
+	switch {
 	case r.AuthURL == "" || r.TokenURL == "":
 		return fmt.Errorf("grants: resource %s needs auth_url and token_url", r.Name)
 	case r.ClientID == "" || r.RedirectURI == "":
@@ -97,6 +115,10 @@ type Provider interface {
 	Exchange(ctx context.Context, res Resource, code, verifier string) (TokenSet, error)
 	Redeem(ctx context.Context, res Resource, refreshToken string) (TokenSet, error)
 	Revoke(ctx context.Context, res Resource, refreshToken string) error
+	// ExchangeToken is lane 3 (D34): RFC 8693 against an
+	// exchange-capable IdP — the caller's own token in, a derived
+	// audience-scoped token out, nothing custodied.
+	ExchangeToken(ctx context.Context, res Resource, subjectToken string) (TokenSet, error)
 }
 
 // GrantInfo is the public form grants.list returns — provenance, no secret.
@@ -159,12 +181,38 @@ func New(store Store, firstKeySeed string, resources []Resource, provider Provid
 func grantName(persona, resource string) string { return "grant/" + persona + "/" + resource }
 func linkName(persona, id string) string        { return "link/" + persona + "/" + id }
 
+// ResourceIsExchange reports whether a declared resource rides lane 3.
+// Unknown resources answer false; the access path's uniform not-found
+// refusal stays the only signal.
+func (b *Broker) ResourceIsExchange(resource string) bool {
+	res, ok := b.resources[resource]
+	return ok && res.IsExchange()
+}
+
+// AccessExchange is lane 3's workhorse (D34): the caller's OWN token —
+// presented, never retained — exchanged at the declared IdP for a token
+// scoped to the resource's audience. No linking, no custody, nothing at
+// rest; the derived token is the only thing that moves.
+func (b *Broker) AccessExchange(ctx context.Context, resource, subjectToken string) (TokenSet, error) {
+	res, ok := b.resources[resource]
+	if !ok || !res.IsExchange() {
+		return TokenSet{}, ErrNotFound
+	}
+	if strings.TrimSpace(subjectToken) == "" {
+		return TokenSet{}, fmt.Errorf("grants: exchange resource %s needs the caller's subject token", resource)
+	}
+	return b.provider.ExchangeToken(ctx, res, subjectToken)
+}
+
 // LinkStart begins the consent ceremony: PKCE S256, the verifier custodied
 // sealed, the authorize URL returned for the persona's own browser.
 func (b *Broker) LinkStart(persona, resource string) (authorizeURL, linkID string, err error) {
 	res, ok := b.resources[resource]
 	if !ok {
 		return "", "", fmt.Errorf("grants: unknown resource %q", resource)
+	}
+	if res.IsExchange() {
+		return "", "", fmt.Errorf("grants: resource %s rides token exchange — nothing to link", resource)
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

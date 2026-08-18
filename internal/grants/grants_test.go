@@ -361,3 +361,52 @@ func TestLinkCeremonyAgainstStandinAS(t *testing.T) {
 		t.Fatal("refresh token rests unsealed")
 	}
 }
+
+func (p *rotatingProvider) ExchangeToken(_ context.Context, _ Resource, st string) (TokenSet, error) {
+	return TokenSet{AccessToken: "xt-for-" + st}, nil
+}
+
+// TestExchangeLane (D34 lane 3): the caller's own token exchanged at
+// the declared IdP over real HTTP — audience declared, client
+// authenticated by registration, nothing custodied, nothing to link.
+func TestExchangeLane(t *testing.T) {
+	var saw url.Values
+	as := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		saw = r.PostForm
+		if u, _, ok := r.BasicAuth(); !ok || u != "broker" {
+			http.Error(w, "no client auth", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "exchanged-token", "expires_in": 600})
+	}))
+	defer as.Close()
+
+	res := Resource{
+		Name: "remote-b", ClientID: "broker",
+		ExchangeTokenURL: as.URL + "/token", ExchangeAudience: "remote-b-aud",
+	}
+	b := newTestBroker(t, NewMemStore(), &HTTPProvider{}, nil, res)
+
+	ts, err := b.AccessExchange(context.Background(), "remote-b", "my-own-bearer")
+	if err != nil || ts.AccessToken != "exchanged-token" {
+		t.Fatalf("exchange: %v %+v", err, ts)
+	}
+	if saw.Get("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" ||
+		saw.Get("subject_token") != "my-own-bearer" ||
+		saw.Get("audience") != "remote-b-aud" {
+		t.Fatalf("exchange form: %v", saw)
+	}
+	// No subject token: refused before any wire touch.
+	if _, err := b.AccessExchange(context.Background(), "remote-b", " "); err == nil {
+		t.Fatal("exchange without a subject token served")
+	}
+	// Nothing to link on lane 3.
+	if _, _, err := b.LinkStart("daan", "remote-b"); err == nil {
+		t.Fatal("link started on an exchange resource")
+	}
+	// Nothing rests: the store never saw a record.
+	if names, _ := b.store.Names(); len(names) != 0 {
+		t.Fatalf("exchange lane custodied something: %v", names)
+	}
+}

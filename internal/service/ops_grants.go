@@ -38,6 +38,10 @@ type grantAccessRequest struct {
 	// OnBehalfOf: the subject's persona key signed the payload (D33).
 	DelegationPayload string `json:"delegation_payload,omitempty"`
 	DelegationSig     string `json:"delegation_sig,omitempty"`
+	// SubjectToken is lane 3's input (D34): the caller's own bearer,
+	// presented for exchange, never retained. Required for exchange
+	// resources, refused elsewhere.
+	SubjectToken string `json:"subject_token,omitempty"`
 }
 
 // grantAccessResponse carries the derived short-lived token — the only
@@ -101,6 +105,24 @@ func (s *Service) dispatchGrants(account, user, op string, body []byte) (any, er
 		}
 		var ts grants.TokenSet
 		var err error
+		if s.grants.ResourceIsExchange(req.Resource) {
+			// Lane 3: the caller's own token, exchanged, nothing
+			// custodied. On-behalf has no meaning here — there is no
+			// custody to redeem for a subject.
+			if req.OnBehalfOf != "" {
+				return nil, errors.New("service: exchange resources serve the caller's own token only")
+			}
+			ts, err = s.grants.AccessExchange(ctx, req.Resource, req.SubjectToken)
+			if err != nil {
+				return nil, err
+			}
+			s.allow(account, user, op, "resource", req.Resource, "lane", "exchange")
+			resp := grantAccessResponse{AccessToken: ts.AccessToken}
+			if !ts.ExpiresAt.IsZero() {
+				resp.ExpiresAt = ts.ExpiresAt.UTC().Format(time.RFC3339)
+			}
+			return resp, nil
+		}
 		if req.OnBehalfOf != "" {
 			// The caller (actor) is the server-proven principal; the
 			// decision — either way — audits both personas (D33).

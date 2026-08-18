@@ -194,3 +194,7 @@ func TestGrantsRefuseUnconfigured(t *testing.T) {
 		t.Fatalf("want unconfigured refusal, got %v", err)
 	}
 }
+
+func (staticProvider) ExchangeToken(_ context.Context, _ grants.Resource, st string) (grants.TokenSet, error) {
+	return grants.TokenSet{AccessToken: "xt-for-" + st}, nil
+}

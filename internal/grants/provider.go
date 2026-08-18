@@ -52,6 +52,50 @@ func (p *HTTPProvider) Redeem(ctx context.Context, res Resource, refreshToken st
 	return p.token(ctx, res, form)
 }
 
+// ExchangeToken implements Provider (RFC 8693, lane 3): the subject
+// token in the form, the audience declared, the client authenticated by
+// registration (Basic; a secret rides only when declared) — the shape
+// the fold's own exchange e2e measured from the RP side.
+func (p *HTTPProvider) ExchangeToken(ctx context.Context, res Resource, subjectToken string) (TokenSet, error) {
+	form := url.Values{
+		"grant_type":         {"urn:ietf:params:oauth:grant-type:token-exchange"},
+		"subject_token":      {subjectToken},
+		"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
+		"audience":           {res.ExchangeAudience},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, res.ExchangeTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return TokenSet{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(res.ClientID, res.ClientSecret)
+	resp, err := p.client().Do(req)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return TokenSet{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return TokenSet{}, fmt.Errorf("grants: exchange endpoint %s: status %d: %.200s", res.Name, resp.StatusCode, body)
+	}
+	var raw struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.AccessToken == "" {
+		return TokenSet{}, fmt.Errorf("grants: exchange endpoint %s: unreadable response", res.Name)
+	}
+	ts := TokenSet{AccessToken: raw.AccessToken}
+	if raw.ExpiresIn > 0 {
+		ts.ExpiresAt = time.Now().Add(time.Duration(raw.ExpiresIn) * time.Second)
+	}
+	return ts, nil
+}
+
 // Revoke implements Provider (RFC 7009); best-effort by contract.
 func (p *HTTPProvider) Revoke(ctx context.Context, res Resource, refreshToken string) error {
 	if res.RevokeURL == "" {
