@@ -47,6 +47,11 @@ Usage:
   soulstream-identity token ls     [conn] --as A/U
   soulstream-identity token revoke [conn] --as A/U --digest D
   soulstream-identity sentinel     [conn] --as A/U        mint the sentinel creds (stdout)
+  soulstream-identity grant link   [conn] --as A/U --resource R      begin an outbound link: consent URL (D30)
+                            | --link-id ID --code C      complete it — custody begins (D31)
+  soulstream-identity grant access [conn] --as A/U --resource R      your derived access token, stdout (D32)
+  soulstream-identity grant ls     [conn] --as A/U
+  soulstream-identity grant revoke [conn] --as A/U --resource R      delete custody; upstream best-effort
   soulstream-identity version
 
 Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
@@ -54,8 +59,9 @@ Conn: --context NAME (a NATS CLI context) or --url URL [--creds-file FILE].
 authenticated as; the server refuses mismatched prefixes (D15). The same
 enforcement gates the ops themselves: management (keys.*, tokens.*, mint,
 sentinel) is reachable only for credentials whose permission template
-grants those op subjects — represented users get sign.record and
-keys.public on their own prefix, nothing more (D25).
+grants those op subjects — represented users get sign.record, keys.public
+and (on grants-enabled deployments) grants.> on their own prefix, nothing
+more (D25/D30).
 Serve reads its xkey seeds from SOULIDENTITY_FIRST_KEY,
 SOULIDENTITY_SURFACE_KEY and (callout, optional) SOULIDENTITY_CALLOUT_KEY;
 the matching flags are accepted but argv is visible in the process table —
@@ -93,6 +99,8 @@ func run(args []string, out, errw io.Writer) int {
 		err = cmdToken(rest, out)
 	case "sentinel":
 		err = cmdSentinel(rest, out)
+	case "grant":
+		err = cmdGrant(rest, out)
 	case "version":
 		fmt.Fprintln(out, version.Version)
 	case "help", "-h", "--help":
@@ -387,6 +395,115 @@ func cmdSentinel(args []string, out io.Writer) error {
 	}
 	fmt.Fprint(out, res.Creds)
 	return nil
+}
+
+// cmdGrant is the outbound-grants ceremony from the caller's own prefix
+// (D30–D32): every verb reaches only the caller's grants — the transport
+// enforces that, not this command.
+func cmdGrant(args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("grant needs a subcommand: link | access | ls | revoke")
+	}
+	switch args[0] {
+	case "link":
+		fs := flag.NewFlagSet("grant link", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		resource := fs.String("resource", "", "declared resource name (begins a ceremony)")
+		linkID := fs.String("link-id", "", "ceremony id from the begin step")
+		code := fs.String("code", "", "authorization code from the consent redirect (completes the ceremony)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		if *code != "" {
+			if *linkID == "" {
+				return errors.New("--code completes a ceremony: --link-id is required")
+			}
+			if err := c.GrantLinkComplete(*linkID, *code); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "linked — custody begins; the refresh token never leaves the service")
+			return nil
+		}
+		if *resource == "" {
+			return errors.New("--resource begins a ceremony (--link-id with --code completes one)")
+		}
+		res, err := c.GrantLinkStart(*resource)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, res.AuthorizeURL)
+		fmt.Fprintf(os.Stderr, "open the URL, consent, then: soulstream-identity grant link --link-id %s --code <code>\n", res.LinkID)
+		return nil
+	case "access":
+		fs := flag.NewFlagSet("grant access", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		resource := fs.String("resource", "", "declared resource name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		res, err := c.GrantAccessToken(*resource)
+		if err != nil {
+			return err
+		}
+		// The derived token alone on stdout — pipeable; provenance on stderr.
+		fmt.Fprintln(out, res.AccessToken)
+		if res.ExpiresAt != "" {
+			fmt.Fprintf(os.Stderr, "expires %s\n", res.ExpiresAt)
+		}
+		return nil
+	case "ls":
+		fs := flag.NewFlagSet("grant ls", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		infos, err := c.Grants()
+		if err != nil {
+			return err
+		}
+		for _, g := range infos {
+			fmt.Fprintf(out, "%s\t%s\t%s\n", g.Resource, strings.Join(g.Scopes, " "), g.LinkedAt)
+		}
+		return nil
+	case "revoke":
+		fs := flag.NewFlagSet("grant revoke", flag.ContinueOnError)
+		cf := addConnFlags(fs)
+		as := asFlag(fs)
+		resource := fs.String("resource", "", "declared resource name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		c, done, err := newClient(cf, *as)
+		if err != nil {
+			return err
+		}
+		defer done()
+		if err := c.GrantRevoke(*resource); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "revoked %s (custody deleted; upstream revocation best-effort)\n", *resource)
+		return nil
+	default:
+		return fmt.Errorf("unknown grant subcommand %q", args[0])
+	}
 }
 
 func cmdKeygen(out, errw io.Writer) error {

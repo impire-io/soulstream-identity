@@ -13,7 +13,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,6 +135,7 @@ func provision(t *testing.T) *ceremony {
 				client.Segment + ".xkey",
 				client.Segment + ".{{account-subject()}}.{{name()}}.sign.record",
 				client.Segment + ".{{account-subject()}}.{{name()}}.keys.public",
+				client.Segment + ".{{account-subject()}}.{{name()}}.grants.>",
 				"$SYS.REQ.USER.INFO",
 			}},
 			Sub: jwt.Permission{Allow: []string{"_INBOX.>"}},
@@ -366,5 +370,206 @@ func TestEmbedGate(t *testing.T) {
 	}
 	if _, err := ops.Status(); err == nil {
 		t.Fatal("surface still serving after drain")
+	}
+}
+
+// TestGrantsGate is spec 003's SC-001 transport clause in consumer
+// position: the represented-user scope template carries the grants op tail,
+// so the only grants a caller can ever reach are its own — proven by the
+// server refusing another persona's publish before the broker hears it
+// (the delivery-log proof), with the link ceremony, strict provider-side
+// rotation, and revocation riding the same admission.
+func TestGrantsGate(t *testing.T) {
+	c := provision(t)
+
+	// The stand-in AS: code exchange seeds rt-0; every refresh redemption
+	// rotates the line and refuses a stale token — so a second access
+	// succeeding proves the rotated successor was custodied, not replayed.
+	var asMu sync.Mutex
+	liveRefresh := ""
+	rotations := 0
+	as := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = r.ParseForm()
+		asMu.Lock()
+		defer asMu.Unlock()
+		switch r.Form.Get("grant_type") {
+		case "authorization_code":
+			if r.Form.Get("code_verifier") == "" {
+				http.Error(w, "no verifier", http.StatusBadRequest)
+				return
+			}
+			liveRefresh = "rt-0"
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "at-0", "refresh_token": liveRefresh, "expires_in": 3600,
+			})
+		case "refresh_token":
+			if r.Form.Get("refresh_token") != liveRefresh {
+				http.Error(w, "stale refresh token", http.StatusBadRequest)
+				return
+			}
+			rotations++
+			liveRefresh = fmt.Sprintf("rt-%d", rotations)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": fmt.Sprintf("at-%d", rotations), "refresh_token": liveRefresh, "expires_in": 3600,
+			})
+		default:
+			http.Error(w, "unsupported grant type", http.StatusBadRequest)
+		}
+	}))
+	defer as.Close()
+
+	audit := &syncBuffer{}
+	logger := slog.New(slog.NewTextHandler(audit, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- embed.Run(ctx, embed.Options{
+			Conn:        c.ncService,
+			CalloutConn: c.ncCallout,
+			FirstKey:    c.firstSeed,
+			SurfaceKey:  c.surfaceSeed,
+			CalloutKey:  c.calloutSeed,
+			AuthAccount: c.authPub,
+			CalloutTTL:  2 * time.Minute,
+			GrantResources: []embed.GrantResource{{
+				Name: "dex", AuthURL: as.URL + "/auth", TokenURL: as.URL + "/token",
+				ClientID: "broker", RedirectURI: "https://shell.invalid/cb",
+			}},
+			Logger: logger,
+		})
+	}()
+
+	ops := client.New(c.ncOps, c.appPub, "ops")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := ops.Status(); err == nil {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("service never served: %v (audit: %s)", err, audit.String())
+		}
+		select {
+		case err := <-runErr:
+			t.Fatalf("Run returned during startup: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	// Provisioning: the M4 ceremony, two represented users this time.
+	if _, err := ops.ImportKey("acme", client.KindNATSAccountSigningKey, c.acmeSKSeed, c.appPub, ""); err != nil {
+		t.Fatalf("import app signing key: %v", err)
+	}
+	if _, err := ops.ImportKey("auth/issuer", client.KindNATSAccountSigningKey, c.authSKSeed, c.authPub, ""); err != nil {
+		t.Fatalf("import auth signing key: %v", err)
+	}
+	aliceTok, err := ops.CreateToken(c.appPub, "alice-ext", "grants gate", 0)
+	if err != nil {
+		t.Fatalf("alice token: %v", err)
+	}
+	bobTok, err := ops.CreateToken(c.appPub, "bob-ext", "grants gate", 0)
+	if err != nil {
+		t.Fatalf("bob token: %v", err)
+	}
+	sentinel, err := ops.MintSentinel()
+	if err != nil {
+		t.Fatalf("mint sentinel: %v", err)
+	}
+	sentinelPath := filepath.Join(t.TempDir(), "sentinel.creds")
+	if err := os.WriteFile(sentinelPath, []byte(sentinel.Creds), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	ncAlice, err := nats.Connect(c.url,
+		nats.UserCredentials(sentinelPath), nats.Token(aliceTok.Token),
+		nats.RetryOnFailedConnect(false), nats.MaxReconnects(0))
+	if err != nil {
+		t.Fatalf("alice admission: %v (audit: %s)", err, audit.String())
+	}
+	defer ncAlice.Close()
+	violations := make(chan string, 8)
+	ncBob, err := nats.Connect(c.url,
+		nats.UserCredentials(sentinelPath), nats.Token(bobTok.Token),
+		nats.RetryOnFailedConnect(false), nats.MaxReconnects(0),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+			select {
+			case violations <- err.Error():
+			default:
+			}
+		}))
+	if err != nil {
+		t.Fatalf("bob admission: %v", err)
+	}
+	defer ncBob.Close()
+
+	// The ceremony, in consumer position: link, then access twice across
+	// strict provider-side rotations.
+	alice := client.New(ncAlice, c.appPub, "alice-ext")
+	link, err := alice.GrantLinkStart("dex")
+	if err != nil {
+		t.Fatalf("link start: %v", err)
+	}
+	if !strings.Contains(link.AuthorizeURL, "code_challenge=") || link.LinkID == "" {
+		t.Fatalf("link start returned %+v", link)
+	}
+	if err := alice.GrantLinkComplete(link.LinkID, "consented-code"); err != nil {
+		t.Fatalf("link complete: %v", err)
+	}
+	first, err := alice.GrantAccessToken("dex")
+	if err != nil || first.AccessToken == "" {
+		t.Fatalf("first access: %v %+v", err, first)
+	}
+	second, err := alice.GrantAccessToken("dex")
+	if err != nil || second.AccessToken == "" {
+		t.Fatalf("second access: %v %+v", err, second)
+	}
+	if second.AccessToken == first.AccessToken {
+		t.Fatal("second access replayed the first token — rotation did not happen")
+	}
+
+	// Bob's own tail is reachable (the refusal is the broker's, by name)…
+	bob := client.New(ncBob, c.appPub, "bob-ext", client.WithTimeout(3*time.Second))
+	if err := func() error { _, err := bob.GrantAccessToken("dex"); return err }(); err == nil || !strings.Contains(err.Error(), "no grant") {
+		t.Fatalf("bob's own access: want grant-not-found, got %v", err)
+	}
+
+	// …but alice's subject is not: the server kills the publish before the
+	// broker hears it — the request dies without a reply, and the violation
+	// lands on bob's own connection.
+	imposter := client.New(ncBob, c.appPub, "alice-ext", client.WithTimeout(2*time.Second))
+	if _, err := imposter.GrantAccessToken("dex"); !errors.Is(err, nats.ErrTimeout) {
+		t.Fatalf("imposter access: want server-side timeout, got %v", err)
+	}
+	select {
+	case v := <-violations:
+		if !strings.Contains(v, "Permissions Violation") || !strings.Contains(v, "alice-ext.grants.access") {
+			t.Fatalf("bob's violation says %q", v)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no permissions violation surfaced on bob's connection")
+	}
+
+	// The delivery-log proof: alice's grants.access reached the broker
+	// exactly twice — her own two calls; the imposter's added nothing.
+	served := 0
+	for _, line := range strings.Split(audit.String(), "\n") {
+		if strings.Contains(line, "op=grants.access") && strings.Contains(line, "user=alice-ext") {
+			served++
+		}
+	}
+	if served != 2 {
+		t.Fatalf("alice's grants.access appears %d times in the delivery log, want 2\n%s", served, audit.String())
+	}
+
+	// Revocation ends custody: the next access refuses.
+	if err := alice.GrantRevoke("dex"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := alice.GrantAccessToken("dex"); err == nil || !strings.Contains(err.Error(), "no grant") {
+		t.Fatalf("access after revoke: want grant-not-found, got %v", err)
 	}
 }

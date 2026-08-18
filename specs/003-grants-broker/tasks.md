@@ -25,23 +25,33 @@
       `--grants-catalog`/`--grants-bucket` (one assembly, two
       entrypoints).
 
-## Remaining — for review and the next session
+## Review pass — 2026-08-18 (morning review, slice landed)
 
-- [ ] T007 Consumer-position e2e (`e2e/` or `e2e/embedgate/`): SC-001's
-      transport clause on an operator-mode server — the scope template
-      grows the grants op tail, a second persona's publish to the
-      victim's grants subject is server-refused with the delivery-log
-      proof. (The mechanism is measured in the research rig — hq episode
-      0104 — but the repo's own gate should carry it.)
-- [ ] T008 CLI verbs (`soulstream-identity grant link|access|ls|revoke`)
-      and the usage block; deployment docs for the scope-template line
-      (the D25 stated-shapes duty).
-- [ ] T009 The real-provider runbook (SC-005, the research residue):
-      GitHub or Google — register the app, link, rotate, revoke; a
-      quickstart.md human step, never a gate test.
-- [ ] T010 Design propagation check after review: grants.md D31's
-      crash-window wording vs the implemented poll-for-rotation; the
-      contention-deadline decision recorded here lands in the design doc
-      if review keeps it.
+Review verdict: sound. Three review additions on this branch: the
+delegation gains a not-before check (`issued_at` validated, D33 amended),
+the no-key-subject refusal is tested directly at both layers, and the
+provider sends `Accept: application/json` (GitHub answers form-encoded
+without it — found writing T009, would have failed the SC-005 walk).
+Named residue, accepted: a revoke racing a rotation best-effort-revokes
+the pre-rotation token upstream; custody deletion is the decision either
+way.
+
+- [x] T007 Consumer-position e2e: `e2e/embedgate` `TestGrantsGate` —
+      the scope template carries the grants op tail; alice links against
+      a strict rotating stand-in AS and accesses twice; bob's publish to
+      alice's grants subject dies at the server (permissions violation
+      on bob's own connection, request unanswered) and the delivery log
+      shows alice's subject served exactly twice; revocation refuses.
+- [x] T008 CLI verbs `grant link|access|ls|revoke` + usage block;
+      README grows the outbound-grants section with the scope-template
+      line (the D25 stated-shapes duty).
+- [x] T009 The real-provider runbook written into quickstart.md (GitHub
+      preferred — rotating refresh tokens exercise D31 live; Google
+      alternative with the offline-ask baked into AuthURL). The live
+      walk itself is the operator's checkbox there — SC-005 stays open
+      until a human runs it.
+- [x] T010 Design propagated: grants.md D31 records the time-bounded
+      contention deadline and the poll-for-rotation bridge; D33 records
+      the not-before check.
 - [ ] T011 Journey episode + roadmap/index refresh in soul-hq at landing
       (the journey duty runs at merge, not at branch).

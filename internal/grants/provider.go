@@ -90,6 +90,9 @@ func (p *HTTPProvider) token(ctx context.Context, res Resource, form url.Values)
 		return TokenSet{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// GitHub answers form-encoded unless asked for JSON; every other
+	// provider either ignores this or already speaks it.
+	req.Header.Set("Accept", "application/json")
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return TokenSet{}, err

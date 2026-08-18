@@ -45,7 +45,8 @@ export SOULIDENTITY_SURFACE_KEY=$(soulstream-identity keygen)
 # Run the service on its NATS connection (creds file = the bypass lane).
 # The vault lives in a KV bucket, sealed. There is no registry: who may
 # reach which op is your permission templates (the operator's creds carry
-# the management ops; represented users get sign.record + keys.public).
+# the management ops; represented users get sign.record + keys.public —
+# and grants.> where outbound grants are declared, see below).
 soulstream-identity serve --creds-file ./service.creds &
 
 # As the operator, declare the team: the account's (scoped) signing key,
@@ -81,6 +82,39 @@ sig, _ := signer.Sign(canonicalBytes)
 
 pub, _ := reader.PersonaPublicKey("daan") // the directory read (D26)
 ```
+
+## Outbound grants — the broker (D30–D34)
+
+Declaring resources (`--grants-catalog resources.json`, a JSON array of
+`{name, auth_url, token_url, revoke_url?, client_id, client_secret?,
+scopes?, redirect_uri}`) switches on the `grants.*` op family: per-persona
+OAuth custody in its own sealed CAS bucket (`--grants-bucket`, default
+`SOULIDENTITY_GRANTS`), with the derived short-lived access token the only
+thing any caller ever receives — the refresh token never crosses the wire
+and never rests unsealed (D32).
+
+The deployment duty (D25's stated shapes): a represented user's scope
+template grows exactly one line beside `sign.record` and `keys.public` —
+
+```
+[<prefix>.]identity.{{account-subject()}}.{{name()}}.grants.>
+```
+
+so it is the transport, never the broker, that keeps every persona to its
+own grants: a publish to another persona's grants subject dies at the
+server as a permissions violation (D15/D30).
+
+```sh
+soulstream-identity grant link   --creds-file ./daan.creds --as AC...PUBKEY/daan --resource github
+# open the printed URL, consent, then complete with the redirect's code:
+soulstream-identity grant link   --creds-file ./daan.creds --as AC...PUBKEY/daan --link-id <id> --code <code>
+soulstream-identity grant access --creds-file ./daan.creds --as AC...PUBKEY/daan --resource github
+```
+
+An agent acting on a persona's behalf presents a subject-signed, bounded
+delegation with `on_behalf_of` (D33, `client.MintDelegation`); the broker
+honors it only from the delegation's actor — the server-proven caller —
+and audits both personas on every decision.
 
 ## What it is not
 

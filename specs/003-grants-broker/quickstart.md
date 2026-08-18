@@ -46,7 +46,40 @@ own connection. Anyone else presenting that delegation is refused.
 
 ## The real-provider runbook (SC-005, human step)
 
-Register a GitHub OAuth app (or Google client), fill the catalog, link
-one persona, call access twice (the second rides the rotated line),
-revoke, confirm the next access refuses. Record the run in the feature's
-checklist before landing.
+Closes the research residue from hq episode 0104 (Bar 2 ran on the Dex
+stand-in; one real provider confirms the shape). A human act — app
+registration needs a browser and an account — never a gate test.
+
+**GitHub (preferred: its refresh tokens rotate, which exercises D31 for
+real).**
+
+1. github.com → Settings → Developer settings → OAuth Apps → New. Set
+   the callback to a URL you control (any https page is fine — the code
+   arrives as `?code=…&state=…` in the address bar). **Enable "Expire
+   user authorization tokens"** on the app — without it GitHub returns
+   no refresh token and the broker refuses the link by design
+   (offline-scope refusal at `link.complete`).
+2. Catalog: `AuthURL https://github.com/login/oauth/authorize`,
+   `TokenURL https://github.com/login/oauth/access_token`, the app's
+   client id + secret, `RedirectURI` = the callback, no `RevokeURL`
+   (GitHub does not speak RFC 7009 — custody deletion alone is the
+   revocation decision there, named honestly).
+3. `soulstream-identity grant link --as <acct>/<you> --resource github`
+   → open the URL, authorize, copy `code` from the redirect.
+4. `… grant link --link-id <id> --code <code>` → linked.
+5. `… grant access --resource github` **twice**: both print a token, the
+   second rides the rotated line (GitHub rotates the refresh token on
+   every redemption — a stale line would refuse here).
+6. `… grant revoke --resource github`, then `grant access` again →
+   refuses with grant-not-found.
+
+**Google (alternative; refresh token is stable, not rotating).** Bake
+the offline ask into the catalog's AuthURL — `LinkStart` preserves
+existing query parameters:
+`https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent`,
+`TokenURL https://oauth2.googleapis.com/token`,
+`RevokeURL https://oauth2.googleapis.com/revoke`.
+
+Record the run's date and provider below when done:
+
+- [ ] SC-005 run: provider ______, date ______, by ______

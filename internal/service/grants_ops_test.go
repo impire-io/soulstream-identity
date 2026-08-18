@@ -159,13 +159,29 @@ func TestGrantsOnBehalf(t *testing.T) {
 		t.Fatalf("stolen delegation: want actor mismatch, got %v", err)
 	}
 
-	// A subject with no persona key cannot be impersonated: no key in the
-	// directory means no verification path, never a fallback.
-	noKey := req
-	noKey.OnBehalfOf = "ghost"
+	// A subject with no persona key cannot be impersonated: a delegation
+	// naming it — however validly signed — has no verification path in the
+	// directory, never a fallback.
+	ghostPayload, err := json.Marshal(grants.Delegation{
+		Subject: "ghost", Actor: "agent-scribe", Resources: []string{"dex"},
+		IssuedAt:  time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghostSig, err := v.SignRecord(PersonaKeyPrefix+"daan", ghostPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noKey := grantAccessRequest{
+		Resource: "dex", OnBehalfOf: "ghost",
+		DelegationPayload: base64.StdEncoding.EncodeToString(ghostPayload),
+		DelegationSig:     ghostSig,
+	}
 	err = call(t, s, accPub, "agent-scribe", "grants.access", noKey, nil)
-	if err == nil || !strings.Contains(err.Error(), "delegation") {
-		t.Fatalf("ghost subject: want delegation refusal, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "persona key") {
+		t.Fatalf("ghost subject: want no-persona-key refusal, got %v", err)
 	}
 }
 

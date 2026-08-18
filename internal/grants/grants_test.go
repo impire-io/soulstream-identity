@@ -236,6 +236,22 @@ func TestDelegationMatrix(t *testing.T) {
 	if _, err := b.AccessOnBehalf(context.Background(), "agent-scribe", "daan", "dex", op, os); !errors.Is(err, ErrDelegationInvalid) {
 		t.Errorf("out-of-bounds: want ErrDelegationInvalid, got %v", err)
 	}
+	// Future-issued: not yet valid, however long the expiry.
+	fpay, _ := json.Marshal(Delegation{
+		Subject: "daan", Actor: "agent-scribe", Resources: []string{"dex"},
+		IssuedAt:  time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		ExpiresAt: time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339),
+	})
+	fsig := ed25519.Sign(priv, fpay)
+	if _, err := b.AccessOnBehalf(context.Background(), "agent-scribe", "daan", "dex",
+		base64.StdEncoding.EncodeToString(fpay), base64.StdEncoding.EncodeToString(fsig)); !errors.Is(err, ErrDelegationInvalid) {
+		t.Errorf("future-issued: want ErrDelegationInvalid, got %v", err)
+	}
+	// Subject without a directory key: no verification path, never a fallback.
+	gp, gs := mint("ghost", "agent-scribe", []string{"dex"}, time.Minute)
+	if _, err := b.AccessOnBehalf(context.Background(), "agent-scribe", "ghost", "dex", gp, gs); !errors.Is(err, ErrDelegationInvalid) {
+		t.Errorf("no-key subject: want ErrDelegationInvalid, got %v", err)
+	}
 	// Tampered payload: signature no longer verifies.
 	tampered := base64.StdEncoding.EncodeToString([]byte(strings.Replace(mustDecode(t, payload), "dex", "hex", 1)))
 	if _, err := b.AccessOnBehalf(context.Background(), "agent-scribe", "daan", "hex", tampered, sig); !errors.Is(err, ErrDelegationInvalid) {

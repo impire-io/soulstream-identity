@@ -339,6 +339,10 @@ func (b *Broker) AccessOnBehalf(ctx context.Context, caller, subject, resource, 
 	if err != nil || b.now().After(exp) {
 		return TokenSet{}, fmt.Errorf("%w: expired", ErrDelegationInvalid)
 	}
+	iss, err := time.Parse(time.RFC3339, d.IssuedAt)
+	if err != nil || b.now().Before(iss) {
+		return TokenSet{}, fmt.Errorf("%w: not yet valid", ErrDelegationInvalid)
+	}
 	if !slices.Contains(d.Resources, resource) {
 		return TokenSet{}, fmt.Errorf("%w: resource %s not delegated", ErrDelegationInvalid, resource)
 	}
