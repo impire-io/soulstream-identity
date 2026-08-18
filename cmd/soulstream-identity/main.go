@@ -223,6 +223,8 @@ func cmdServe(args []string, errw io.Writer) error {
 	grantsCatalog := fs.String("grants-catalog", "", "JSON file declaring outbound-grant resources (D34); enables the grants.* ops")
 	grantsBucket := fs.String("grants-bucket", "SOULIDENTITY_GRANTS", "KV bucket holding sealed grant custody (D31)")
 	secretsBucket := fs.String("secrets-bucket", "SOULIDENTITY_SECRETS", "KV bucket holding the sealed general secret store (D36)")
+	enableGuardrail := fs.Bool("guardrail", false, "put the evaluator on the op path (D37); rules load live via guardrail.load")
+	guardrailRules := fs.String("guardrail-rules", "", "JSON file with the starting rule set [{name, when, effect}]")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -234,6 +236,16 @@ func cmdServe(args []string, errw io.Writer) error {
 		}
 		if err := json.Unmarshal(raw, &grantResources); err != nil {
 			return fmt.Errorf("grants catalog %s: %w", *grantsCatalog, err)
+		}
+	}
+	var startingRules []embed.GuardrailRule
+	if *guardrailRules != "" {
+		raw, err := os.ReadFile(*guardrailRules)
+		if err != nil {
+			return fmt.Errorf("guardrail rules: %w", err)
+		}
+		if err := json.Unmarshal(raw, &startingRules); err != nil {
+			return fmt.Errorf("guardrail rules %s: %w", *guardrailRules, err)
 		}
 	}
 	firstSeed, err := seedFromFlagOrEnv(*firstKey, "SOULIDENTITY_FIRST_KEY")
@@ -278,23 +290,25 @@ func cmdServe(args []string, errw io.Writer) error {
 	// One assembly, two entrypoints (D29): the daemon parses flags and
 	// owns its connections; the plane itself is the public embed package.
 	err = embed.Run(ctx, embed.Options{
-		Conn:           nc,
-		CalloutConn:    ncCallout,
-		VaultBucket:    *bucket,
-		TokenBucket:    *tokenBucket,
-		FirstKey:       firstSeed,
-		SurfaceKey:     surfaceSeed,
-		CalloutKey:     calloutSeed,
-		AuthKeyName:    *authKey,
-		AuthAccount:    *authAccount,
-		CalloutTTL:     *calloutTTL,
-		Prefix:         *cf.prefix,
-		OIDCIssuer:     stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER"),
-		OIDCAudience:   stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
-		GrantResources: grantResources,
-		GrantsBucket:   *grantsBucket,
-		SecretsBucket:  *secretsBucket,
-		Logger:         slog.New(slog.NewTextHandler(errw, nil)),
+		Conn:            nc,
+		CalloutConn:     ncCallout,
+		VaultBucket:     *bucket,
+		TokenBucket:     *tokenBucket,
+		FirstKey:        firstSeed,
+		SurfaceKey:      surfaceSeed,
+		CalloutKey:      calloutSeed,
+		AuthKeyName:     *authKey,
+		AuthAccount:     *authAccount,
+		CalloutTTL:      *calloutTTL,
+		Prefix:          *cf.prefix,
+		OIDCIssuer:      stringFromFlagOrEnv(*oidcIssuer, "SOULIDENTITY_OIDC_ISSUER"),
+		OIDCAudience:    stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
+		GrantResources:  grantResources,
+		GrantsBucket:    *grantsBucket,
+		SecretsBucket:   *secretsBucket,
+		EnableGuardrail: *enableGuardrail,
+		GuardrailRules:  startingRules,
+		Logger:          slog.New(slog.NewTextHandler(errw, nil)),
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err

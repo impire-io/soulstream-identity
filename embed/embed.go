@@ -31,6 +31,7 @@ import (
 
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
+	"github.com/impire-io/soulstream-identity/internal/guardrail"
 	"github.com/impire-io/soulstream-identity/internal/sealedstore"
 	"github.com/impire-io/soulstream-identity/internal/secrets"
 	"github.com/impire-io/soulstream-identity/internal/service"
@@ -106,6 +107,22 @@ type Options struct {
 	// SecretsBucket is the KV bucket holding the sealed general secret
 	// store (its own domain, D36). Default "SOULIDENTITY_SECRETS".
 	SecretsBucket string
+
+	// EnableGuardrail puts the evaluator on the op path (D37) even with
+	// an empty rule set (the operator loads rules live via
+	// guardrail.load). Non-empty GuardrailRules enables it implicitly.
+	EnableGuardrail bool
+
+	// GuardrailRules is the starting rule set: first match decides;
+	// effects are allow | deny | defer. Invalid rules refuse startup.
+	GuardrailRules []GuardrailRule
+}
+
+// GuardrailRule is one data-carried rule, by value.
+type GuardrailRule struct {
+	Name   string
+	When   string
+	Effect string
 }
 
 // GrantResource is one declared remote system, by value.
@@ -270,6 +287,23 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	svcOpts = append(svcOpts, service.WithSecrets(secretStore))
+
+	// The guardrail (D37): enabled deliberately — an evaluator with no
+	// rules allows everything but keeps the load/approve ops alive.
+	if o.EnableGuardrail || len(o.GuardrailRules) > 0 {
+		eval, err := guardrail.New()
+		if err != nil {
+			return err
+		}
+		rules := make([]guardrail.Rule, len(o.GuardrailRules))
+		for i, r := range o.GuardrailRules {
+			rules[i] = guardrail.Rule{Name: r.Name, When: r.When, Effect: guardrail.Effect(r.Effect)}
+		}
+		if err := eval.Load(rules); err != nil {
+			return err
+		}
+		svcOpts = append(svcOpts, service.WithGuardrail(eval))
+	}
 
 	svcOpts = append(svcOpts, service.WithPrefix(o.Prefix))
 	svc, err := service.New(v, o.SurfaceKey, o.Logger, svcOpts...)

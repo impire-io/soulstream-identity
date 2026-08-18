@@ -22,6 +22,7 @@ import (
 
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
+	"github.com/impire-io/soulstream-identity/internal/guardrail"
 	"github.com/impire-io/soulstream-identity/internal/mint"
 	"github.com/impire-io/soulstream-identity/internal/secrets"
 	"github.com/impire-io/soulstream-identity/internal/vault"
@@ -100,6 +101,10 @@ type Service struct {
 	// those ops refuse.
 	secrets *secrets.Service
 
+	// The guardrail (tenancy.md D37/D38) at its chokepoint: every sealed
+	// op is evaluated before dispatch. Nil = no evaluation, no gate.
+	guardrail *guardrail.Evaluator
+
 	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
 	root string
 }
@@ -131,6 +136,15 @@ func WithGrants(broker *grants.Broker) Option {
 func WithSecrets(store *secrets.Service) Option {
 	return func(s *Service) {
 		s.secrets = store
+	}
+}
+
+// WithGuardrail puts the evaluator on the op path (D37): every sealed
+// op is evaluated before dispatch — deny and defer refuse — and the
+// guardrail.load / approvals.present ops come alive.
+func WithGuardrail(e *guardrail.Evaluator) Option {
+	return func(s *Service) {
+		s.guardrail = e
 	}
 }
 
@@ -302,6 +316,18 @@ func (s *Service) respond(subject string, data []byte) []byte {
 		return marshal(errorResponse{Error: "service: request cannot be unsealed"})
 	}
 
+	// The chokepoint (D37): evaluated after unseal, before dispatch —
+	// refused here, the action never had authority.
+	if gerr := s.guardCheck(account, user, op, plain); gerr != nil {
+		s.refuse(account, user, op, gerr)
+		body := marshal(errorResponse{Error: gerr.Error()})
+		sealed, serr := s.surface.Seal(body, env.XKey)
+		if serr != nil {
+			return marshal(errorResponse{Error: "service: reply cannot be sealed"})
+		}
+		return marshal(envelope{XKey: s.surfacePub, Data: sealed})
+	}
+
 	result, err := s.dispatch(account, user, op, plain)
 	var body []byte
 	if err != nil {
@@ -430,6 +456,9 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 
 	case "secrets.put", "secrets.get", "secrets.list", "secrets.delete":
 		return s.dispatchSecrets(account, user, op, body)
+
+	case "guardrail.load", "approvals.present":
+		return s.dispatchGuardrail(account, user, op, body)
 
 	default:
 		return nil, fmt.Errorf("service: unknown op %q", op)
