@@ -31,6 +31,10 @@ const (
 	// KindPersonaSigningKey is a Soulstream persona's Ed25519 seed (base64,
 	// 32 bytes — the `soulstream key init` file format): signs canonical records.
 	KindPersonaSigningKey Kind = "persona-signing-key"
+	// KindNATSOperatorKey is an operator (signing) nkey seed ("SO…"): signs
+	// account JWTs — the account-creating authority's root (tenancy.md D35).
+	// No binding: the operator stands above accounts.
+	KindNATSOperatorKey Kind = "nats-operator-key"
 )
 
 // Entry is a vault key as the API shows it: never the secret. The binding
@@ -145,7 +149,7 @@ func checkName(name string) error {
 // derive validates a secret for its kind and returns the public key.
 func derive(kind Kind, secret string) (string, error) {
 	switch kind {
-	case KindNATSAccountSigningKey, KindNATSUserKey:
+	case KindNATSAccountSigningKey, KindNATSUserKey, KindNATSOperatorKey:
 		kp, err := nkeys.FromSeed([]byte(secret))
 		if err != nil {
 			return "", fmt.Errorf("vault: not an nkey seed: %w", err)
@@ -159,6 +163,9 @@ func derive(kind Kind, secret string) (string, error) {
 		}
 		if kind == KindNATSUserKey && !nkeys.IsValidPublicUserKey(pub) {
 			return "", fmt.Errorf("vault: seed is not a user key (public key %s…)", pub[:2])
+		}
+		if kind == KindNATSOperatorKey && !nkeys.IsValidPublicOperatorKey(pub) {
+			return "", fmt.Errorf("vault: seed is not an operator key (public key %s…)", pub[:2])
 		}
 		return pub, nil
 	case KindPersonaSigningKey:
@@ -369,7 +376,7 @@ func (v *Vault) KeyPair(name string) (nkeys.KeyPair, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.Kind != KindNATSAccountSigningKey && s.Kind != KindNATSUserKey {
+	if s.Kind != KindNATSAccountSigningKey && s.Kind != KindNATSUserKey && s.Kind != KindNATSOperatorKey {
 		return nil, fmt.Errorf("vault: %s is %q — not an nkey", name, s.Kind)
 	}
 	kp, err := nkeys.FromSeed([]byte(s.Secret))

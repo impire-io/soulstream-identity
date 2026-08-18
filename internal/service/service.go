@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/impire-io/soulstream-identity/internal/accounts"
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
 	"github.com/impire-io/soulstream-identity/internal/guardrail"
@@ -105,6 +106,10 @@ type Service struct {
 	// op is evaluated before dispatch. Nil = no evaluation, no gate.
 	guardrail *guardrail.Evaluator
 
+	// The tenancy engine (tenancy.md D35) behind the accounts.* ops.
+	// Nil = those ops refuse.
+	accounts *accounts.Engine
+
 	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
 	root string
 }
@@ -145,6 +150,14 @@ func WithSecrets(store *secrets.Service) Option {
 func WithGuardrail(e *guardrail.Evaluator) Option {
 	return func(s *Service) {
 		s.guardrail = e
+	}
+}
+
+// WithAccounts enables the accounts.* ops (D35): the tenancy engine
+// over its authority backend.
+func WithAccounts(e *accounts.Engine) Option {
+	return func(s *Service) {
+		s.accounts = e
 	}
 }
 
@@ -459,6 +472,10 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 
 	case "guardrail.load", "approvals.present":
 		return s.dispatchGuardrail(account, user, op, body)
+
+	case "accounts.create", "accounts.resolve", "accounts.list",
+		"accounts.suspend", "accounts.resume":
+		return s.dispatchAccounts(account, user, op, body)
 
 	default:
 		return nil, fmt.Errorf("service: unknown op %q", op)

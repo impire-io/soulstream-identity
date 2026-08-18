@@ -225,6 +225,10 @@ func cmdServe(args []string, errw io.Writer) error {
 	secretsBucket := fs.String("secrets-bucket", "SOULIDENTITY_SECRETS", "KV bucket holding the sealed general secret store (D36)")
 	enableGuardrail := fs.Bool("guardrail", false, "put the evaluator on the op path (D37); rules load live via guardrail.load")
 	guardrailRules := fs.String("guardrail-rules", "", "JSON file with the starting rule set [{name, when, effect}]")
+	systemCreds := fs.String("system-creds", "", "creds file for the system-account connection (enables the accounts.* ops, D35)")
+	systemContext := fs.String("system-context", "", "NATS CLI context for the system-account connection")
+	operatorKey := fs.String("operator-key", "operator/root", "vault name of the SO… operator seed the account authority signs with")
+	accountsBucket := fs.String("accounts-bucket", "SOULIDENTITY_ACCOUNTS", "KV bucket holding the sealed account records (D35)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -286,12 +290,24 @@ func cmdServe(args []string, errw io.Writer) error {
 		}
 		defer ncCallout.Close()
 	}
+	var ncSystem *nats.Conn
+	if *systemCreds != "" || *systemContext != "" {
+		systemCF := connFlags{context: systemContext, url: cf.url, creds: systemCreds}
+		ncSystem, err = systemCF.connect()
+		if err != nil {
+			return fmt.Errorf("system connection: %w", err)
+		}
+		defer ncSystem.Close()
+	}
 
 	// One assembly, two entrypoints (D29): the daemon parses flags and
 	// owns its connections; the plane itself is the public embed package.
 	err = embed.Run(ctx, embed.Options{
 		Conn:            nc,
 		CalloutConn:     ncCallout,
+		SystemConn:      ncSystem,
+		OperatorKeyName: *operatorKey,
+		AccountsBucket:  *accountsBucket,
 		VaultBucket:     *bucket,
 		TokenBucket:     *tokenBucket,
 		FirstKey:        firstSeed,

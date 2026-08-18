@@ -29,6 +29,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/impire-io/soulstream-identity/internal/accounts"
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
 	"github.com/impire-io/soulstream-identity/internal/guardrail"
@@ -116,6 +117,20 @@ type Options struct {
 	// GuardrailRules is the starting rule set: first match decides;
 	// effects are allow | deny | defer. Invalid rules refuse startup.
 	GuardrailRules []GuardrailRule
+
+	// SystemConn is the system-account connection. Its presence enables
+	// the accounts.* ops (D35) with the local-operator authority: account
+	// JWTs signed by the vault-held operator key, landed on the resolver
+	// through this connection.
+	SystemConn *nats.Conn
+
+	// OperatorKeyName is the vault name of the SO… operator seed the
+	// local authority signs with. Default "operator/root".
+	OperatorKeyName string
+
+	// AccountsBucket is the KV bucket holding the sealed name→account
+	// records (D35). Default "SOULIDENTITY_ACCOUNTS".
+	AccountsBucket string
 }
 
 // GuardrailRule is one data-carried rule, by value.
@@ -153,6 +168,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.SecretsBucket == "" {
 		o.SecretsBucket = "SOULIDENTITY_SECRETS"
+	}
+	if o.OperatorKeyName == "" {
+		o.OperatorKeyName = "operator/root"
+	}
+	if o.AccountsBucket == "" {
+		o.AccountsBucket = "SOULIDENTITY_ACCOUNTS"
 	}
 	if o.CalloutTTL == 0 {
 		o.CalloutTTL = 15 * time.Minute
@@ -303,6 +324,21 @@ func Run(ctx context.Context, o Options) error {
 			return err
 		}
 		svcOpts = append(svcOpts, service.WithGuardrail(eval))
+	}
+
+	// The tenancy engine (D35): enabled exactly when the system-account
+	// connection is supplied — the callout pattern, one more time.
+	if o.SystemConn != nil {
+		accountsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.AccountsBucket})
+		if err != nil {
+			return fmt.Errorf("kv bucket %s: %w", o.AccountsBucket, err)
+		}
+		engine, err := accounts.New(sealedstore.NewKVStore(accountsKV), o.FirstKey,
+			&accounts.LocalOperator{Vault: v, OperatorKeyName: o.OperatorKeyName, Sys: o.SystemConn})
+		if err != nil {
+			return err
+		}
+		svcOpts = append(svcOpts, service.WithAccounts(engine))
 	}
 
 	svcOpts = append(svcOpts, service.WithPrefix(o.Prefix))
