@@ -22,15 +22,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nats-io/nkeys"
+	"github.com/impire-io/soulstream-identity/internal/sealedstore"
 )
 
 var (
 	// ErrNotFound is the one refusal for absent grants — identical whether
 	// the resource exists or not, so refusals cannot probe custody.
 	ErrNotFound = errors.New("grants: no grant for this persona and resource")
-	// ErrCASConflict reports a losing compare-and-swap write.
-	ErrCASConflict = errors.New("grants: record changed underneath the update")
+	// ErrCASConflict reports a losing compare-and-swap write (the shared
+	// custody-domain error, so store returns match by errors.Is).
+	ErrCASConflict = sealedstore.ErrCASConflict
 	// ErrLinkInvalid covers expired, spent, or unknown link ceremonies.
 	ErrLinkInvalid = errors.New("grants: link ceremony is unknown, spent, or expired")
 	// ErrDelegationInvalid covers absent, unverifiable, expired, or
@@ -122,7 +123,7 @@ type SubjectKeyResolver func(subject string) (string, error)
 
 // Broker is the custody engine behind the grants.* ops.
 type Broker struct {
-	store      *sealedStore
+	store      *sealedstore.Sealed
 	resources  map[string]Resource
 	provider   Provider
 	subjectKey SubjectKeyResolver
@@ -132,13 +133,9 @@ type Broker struct {
 // New builds a broker over a CAS store sealed with the deployment's first
 // key (the same seed the vault seals with — one custody root, two domains).
 func New(store Store, firstKeySeed string, resources []Resource, provider Provider, subjectKey SubjectKeyResolver) (*Broker, error) {
-	kp, err := nkeys.FromCurveSeed([]byte(strings.TrimSpace(firstKeySeed)))
+	sealed, err := sealedstore.NewSealed(store, strings.TrimSpace(firstKeySeed))
 	if err != nil {
-		return nil, fmt.Errorf("grants: first key is not a curve (SX…) seed: %w", err)
-	}
-	pub, err := kp.PublicKey()
-	if err != nil {
-		return nil, fmt.Errorf("grants: first key public half: %w", err)
+		return nil, fmt.Errorf("grants: %w", err)
 	}
 	m := make(map[string]Resource, len(resources))
 	for _, r := range resources {
@@ -151,7 +148,7 @@ func New(store Store, firstKeySeed string, resources []Resource, provider Provid
 		m[r.Name] = r
 	}
 	return &Broker{
-		store:      &sealedStore{store: store, first: kp, firstPub: pub},
+		store:      sealed,
 		resources:  m,
 		provider:   provider,
 		subjectKey: subjectKey,
@@ -182,7 +179,7 @@ func (b *Broker) LinkStart(persona, resource string) (authorizeURL, linkID strin
 		Verifier: verifier,
 		Expires:  b.now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 	}
-	if _, err := b.store.put(linkName(persona, linkID), rec, 0); err != nil {
+	if _, err := b.store.Put(linkName(persona, linkID), rec, 0); err != nil {
 		return "", "", err
 	}
 
@@ -208,12 +205,12 @@ func (b *Broker) LinkStart(persona, resource string) (authorizeURL, linkID strin
 // record is spent first — a ceremony redeems at most once.
 func (b *Broker) LinkComplete(ctx context.Context, persona, linkID, code string) error {
 	var rec linkRecord
-	if _, err := b.store.get(linkName(persona, linkID), &rec); err != nil {
+	if _, err := b.store.Get(linkName(persona, linkID), &rec); err != nil {
 		return ErrLinkInvalid
 	}
 	// Spend before redeeming: a crash after this point costs a re-link,
 	// never a double custody line (the same honesty as D31's write order).
-	if err := b.store.delete(linkName(persona, linkID)); err != nil {
+	if err := b.store.Delete(linkName(persona, linkID)); err != nil {
 		return ErrLinkInvalid
 	}
 	if exp, err := time.Parse(time.RFC3339, rec.Expires); err != nil || b.now().After(exp) {
@@ -235,11 +232,11 @@ func (b *Broker) LinkComplete(ctx context.Context, persona, linkID, code string)
 	// Re-linking replaces the line: read any existing revision and write
 	// over it under CAS.
 	var existing grantRecord
-	rev, err := b.store.get(grantName(persona, rec.Resource), &existing)
+	rev, err := b.store.Get(grantName(persona, rec.Resource), &existing)
 	if err != nil {
 		rev = 0
 	}
-	if _, err := b.store.put(grantName(persona, rec.Resource), g, rev); err != nil {
+	if _, err := b.store.Put(grantName(persona, rec.Resource), g, rev); err != nil {
 		return err
 	}
 	return nil
@@ -258,7 +255,7 @@ func (b *Broker) Access(ctx context.Context, persona, resource string) (TokenSet
 	deadline := b.now().Add(5 * time.Second)
 	for b.now().Before(deadline) {
 		var g grantRecord
-		rev, err := b.store.get(grantName(persona, resource), &g)
+		rev, err := b.store.Get(grantName(persona, resource), &g)
 		if err != nil {
 			return TokenSet{}, ErrNotFound
 		}
@@ -275,7 +272,7 @@ func (b *Broker) Access(ctx context.Context, persona, resource string) (TokenSet
 		}
 		if tok.RefreshToken != "" && tok.RefreshToken != g.RefreshToken {
 			g.RefreshToken = tok.RefreshToken
-			if _, err := b.store.put(grantName(persona, resource), g, rev); err != nil {
+			if _, err := b.store.Put(grantName(persona, resource), g, rev); err != nil {
 				if errors.Is(err, ErrCASConflict) {
 					return tok, nil // the winner's successor is the line
 				}
@@ -294,7 +291,7 @@ func (b *Broker) waitForRotation(ctx context.Context, name string, seen uint64) 
 	deadline := b.now().Add(500 * time.Millisecond)
 	for b.now().Before(deadline) {
 		var cur grantRecord
-		curRev, err := b.store.get(name, &cur)
+		curRev, err := b.store.Get(name, &cur)
 		if err != nil {
 			return false // deleted underneath us — not a rotation
 		}
@@ -362,7 +359,7 @@ func (b *Broker) AccessOnBehalf(ctx context.Context, caller, subject, resource, 
 
 // List returns the persona's grants, public form only.
 func (b *Broker) List(persona string) ([]GrantInfo, error) {
-	names, err := b.store.names()
+	names, err := b.store.Names()
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +371,7 @@ func (b *Broker) List(persona string) ([]GrantInfo, error) {
 			continue
 		}
 		var g grantRecord
-		if _, err := b.store.get(n, &g); err != nil {
+		if _, err := b.store.Get(n, &g); err != nil {
 			return nil, err
 		}
 		out = append(out, GrantInfo{Resource: res, Scopes: g.Scopes, LinkedAt: g.LinkedAt})
@@ -386,10 +383,10 @@ func (b *Broker) List(persona string) ([]GrantInfo, error) {
 // deletion is the decision; the upstream call may fail without undoing it.
 func (b *Broker) Revoke(ctx context.Context, persona, resource string) error {
 	var g grantRecord
-	if _, err := b.store.get(grantName(persona, resource), &g); err != nil {
+	if _, err := b.store.Get(grantName(persona, resource), &g); err != nil {
 		return ErrNotFound
 	}
-	if err := b.store.delete(grantName(persona, resource)); err != nil {
+	if err := b.store.Delete(grantName(persona, resource)); err != nil {
 		return err
 	}
 	if res, ok := b.resources[resource]; ok && res.RevokeURL != "" {

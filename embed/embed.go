@@ -31,6 +31,8 @@ import (
 
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
+	"github.com/impire-io/soulstream-identity/internal/sealedstore"
+	"github.com/impire-io/soulstream-identity/internal/secrets"
 	"github.com/impire-io/soulstream-identity/internal/service"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
@@ -100,6 +102,10 @@ type Options struct {
 	// GrantsBucket is the KV bucket holding sealed grant custody (its own
 	// domain, D31 — never the key vault). Default "SOULIDENTITY_GRANTS".
 	GrantsBucket string
+
+	// SecretsBucket is the KV bucket holding the sealed general secret
+	// store (its own domain, D36). Default "SOULIDENTITY_SECRETS".
+	SecretsBucket string
 }
 
 // GrantResource is one declared remote system, by value.
@@ -127,6 +133,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.GrantsBucket == "" {
 		o.GrantsBucket = "SOULIDENTITY_GRANTS"
+	}
+	if o.SecretsBucket == "" {
+		o.SecretsBucket = "SOULIDENTITY_SECRETS"
 	}
 	if o.CalloutTTL == 0 {
 		o.CalloutTTL = 15 * time.Minute
@@ -248,6 +257,19 @@ func Run(ctx context.Context, o Options) error {
 		}
 		svcOpts = append(svcOpts, service.WithGrants(broker))
 	}
+
+	// The secret store (tenancy.md D36): always on — the surface is
+	// principal-scoped, an empty domain costs nothing, and reachability
+	// stays the deployment's permission-template decision.
+	secretsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.SecretsBucket})
+	if err != nil {
+		return fmt.Errorf("kv bucket %s: %w", o.SecretsBucket, err)
+	}
+	secretStore, err := secrets.New(sealedstore.NewKVStore(secretsKV), o.FirstKey)
+	if err != nil {
+		return err
+	}
+	svcOpts = append(svcOpts, service.WithSecrets(secretStore))
 
 	svcOpts = append(svcOpts, service.WithPrefix(o.Prefix))
 	svc, err := service.New(v, o.SurfaceKey, o.Logger, svcOpts...)

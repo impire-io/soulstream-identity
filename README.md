@@ -116,6 +116,17 @@ delegation with `on_behalf_of` (D33, `client.MintDelegation`); the broker
 honors it only from the delegation's actor — the server-proven caller —
 and audits both personas on every decision.
 
+## Secrets — the custodian's general store (D36)
+
+`secrets.put|get|list|delete` on the caller's own prefix: caller-named
+paths under the persona's own tree by construction, CAS-conditioned
+writes, sealed at rest under the first key (bucket `--secrets-bucket`,
+default `SOULIDENTITY_SECRETS`). Reachability is the deployment's
+permission template: grow the represented-user line with
+`…{{account-subject()}}.{{name()}}.secrets.>` where personas should
+hold secrets. Prefer service-side acts that *use* a secret over raw
+reads — signing already works that way (D8's rule).
+
 ## What it is not
 
 Not a KMS (storage backends are pluggable; NATS KV with xkey envelope

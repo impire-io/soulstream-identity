@@ -23,6 +23,7 @@ import (
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
 	"github.com/impire-io/soulstream-identity/internal/mint"
+	"github.com/impire-io/soulstream-identity/internal/secrets"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
 )
@@ -95,6 +96,10 @@ type Service struct {
 	// ops refuse.
 	grants *grants.Broker
 
+	// The secret store (tenancy.md D36) behind the secrets.* ops. Nil =
+	// those ops refuse.
+	secrets *secrets.Service
+
 	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
 	root string
 }
@@ -118,6 +123,14 @@ func WithCallout(store callout.Store, authKeyName, authAccount string) Option {
 func WithGrants(broker *grants.Broker) Option {
 	return func(s *Service) {
 		s.grants = broker
+	}
+}
+
+// WithSecrets enables the secrets.* ops (D36): the custodian's general
+// secret store, per-persona trees structural.
+func WithSecrets(store *secrets.Service) Option {
+	return func(s *Service) {
+		s.secrets = store
 	}
 }
 
@@ -414,6 +427,9 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 	case "grants.link.start", "grants.link.complete", "grants.access",
 		"grants.list", "grants.revoke":
 		return s.dispatchGrants(account, user, op, body)
+
+	case "secrets.put", "secrets.get", "secrets.list", "secrets.delete":
+		return s.dispatchSecrets(account, user, op, body)
 
 	default:
 		return nil, fmt.Errorf("service: unknown op %q", op)

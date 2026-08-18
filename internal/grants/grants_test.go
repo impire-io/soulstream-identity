@@ -93,7 +93,7 @@ func (p *rotatingProvider) redeemable(rt string) bool {
 func seedGrant(t *testing.T, b *Broker, persona, resource, refreshToken string) {
 	t.Helper()
 	g := grantRecord{RefreshToken: refreshToken, LinkedAt: time.Now().UTC().Format(time.RFC3339)}
-	if _, err := b.store.put(grantName(persona, resource), g, 0); err != nil {
+	if _, err := b.store.Put(grantName(persona, resource), g, 0); err != nil {
 		t.Fatalf("seed grant: %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestAccessRotationPersists(t *testing.T) {
 		}
 	}
 	var g grantRecord
-	if _, err := b.store.get(grantName("alice", "dex"), &g); err != nil {
+	if _, err := b.store.Get(grantName("alice", "dex"), &g); err != nil {
 		t.Fatal(err)
 	}
 	if !prov.redeemable(g.RefreshToken) {
@@ -153,7 +153,7 @@ func TestConcurrentAccessLosesNothing(t *testing.T) {
 				}
 			}
 			var g grantRecord
-			if _, err := b.store.get(grantName("alice", "dex"), &g); err != nil {
+			if _, err := b.store.Get(grantName("alice", "dex"), &g); err != nil {
 				t.Fatalf("grant gone after race: %v", err)
 			}
 			if !prov.redeemable(g.RefreshToken) {

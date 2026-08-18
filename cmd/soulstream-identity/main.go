@@ -222,6 +222,7 @@ func cmdServe(args []string, errw io.Writer) error {
 	oidcAudience := fs.String("oidc-audience", "", "OIDC audience (the app registration's client ID); or SOULIDENTITY_OIDC_AUDIENCE")
 	grantsCatalog := fs.String("grants-catalog", "", "JSON file declaring outbound-grant resources (D34); enables the grants.* ops")
 	grantsBucket := fs.String("grants-bucket", "SOULIDENTITY_GRANTS", "KV bucket holding sealed grant custody (D31)")
+	secretsBucket := fs.String("secrets-bucket", "SOULIDENTITY_SECRETS", "KV bucket holding the sealed general secret store (D36)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -292,6 +293,7 @@ func cmdServe(args []string, errw io.Writer) error {
 		OIDCAudience:   stringFromFlagOrEnv(*oidcAudience, "SOULIDENTITY_OIDC_AUDIENCE"),
 		GrantResources: grantResources,
 		GrantsBucket:   *grantsBucket,
+		SecretsBucket:  *secretsBucket,
 		Logger:         slog.New(slog.NewTextHandler(errw, nil)),
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
