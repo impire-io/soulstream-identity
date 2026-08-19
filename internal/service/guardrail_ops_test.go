@@ -127,3 +127,34 @@ func TestApprovalFlow(t *testing.T) {
 		t.Fatal("approval did not spend")
 	}
 }
+
+// TestActingStampIsCustodianVerified (E3, hq episode 0112): sign.record
+// refuses a canonical whose acting field names anyone but the
+// server-proven caller — that check is what makes the field provenance
+// rather than a self-claim. Canonicals without the field pass.
+func TestActingStampIsCustodianVerified(t *testing.T) {
+	s, _, accPub, _ := guardrailHarness(t)
+	canonical := func(acting string) string {
+		if acting == "" {
+			return base64.StdEncoding.EncodeToString([]byte(`{"v":2,"author":"daan"}`))
+		}
+		return base64.StdEncoding.EncodeToString([]byte(`{"v":2,"acting":"` + acting + `","author":"daan"}`))
+	}
+
+	// The caller's own hand: signed.
+	if err := call(t, s, accPub, "daan", "sign.record",
+		signRecordRequest{Key: PersonaKeyPrefix + "daan", Canonical: canonical("daan")}, nil); err != nil {
+		t.Fatalf("own acting: %v", err)
+	}
+	// Another's hand claimed: refused by name.
+	err := call(t, s, accPub, "daan", "sign.record",
+		signRecordRequest{Key: PersonaKeyPrefix + "daan", Canonical: canonical("mallory")}, nil)
+	if err == nil || !strings.Contains(err.Error(), "custodian-verified") {
+		t.Fatalf("foreign acting: want the E3 refusal, got %v", err)
+	}
+	// No acting field (a delegation payload, say): untouched.
+	if err := call(t, s, accPub, "daan", "sign.record",
+		signRecordRequest{Key: PersonaKeyPrefix + "daan", Canonical: canonical("")}, nil); err != nil {
+		t.Fatalf("fieldless canonical: %v", err)
+	}
+}

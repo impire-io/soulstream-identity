@@ -141,3 +141,16 @@ func (s *Service) ownedOrDirectoryPersonaKey(persona string) (entry struct{ Publ
 func jsonUnmarshalLoose(data []byte, out any) error {
 	return json.Unmarshal(data, out)
 }
+
+// actingFieldOf reads the canonical's acting claim, "" when none exists
+// — record canonicals carry it since v2; delegation payloads and other
+// signed material do not.
+func actingFieldOf(canonical []byte) string {
+	var probe struct {
+		Acting string `json:"acting"`
+	}
+	if err := json.Unmarshal(canonical, &probe); err != nil {
+		return ""
+	}
+	return probe.Acting
+}

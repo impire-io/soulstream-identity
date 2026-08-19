@@ -408,6 +408,14 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("service: canonical is not base64: %w", err)
 		}
+		// E3's custodial grade (hq episode 0112): where the canonical
+		// claims whose hand held the pen, the hand must be the
+		// server-proven caller — the field becomes verified provenance,
+		// not a self-claim. Canonicals without the field (delegation
+		// payloads, non-record material) pass untouched.
+		if acting := actingFieldOf(canonical); acting != "" && acting != user {
+			return nil, fmt.Errorf("service: canonical names acting %q but the caller is %q — the acting credential is custodian-verified (E3)", acting, user)
+		}
 		sig, err := s.vault.SignRecord(req.Key, canonical)
 		if err != nil {
 			return nil, err
