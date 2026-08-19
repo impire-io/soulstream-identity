@@ -9,7 +9,7 @@ module soulstream-identity.invalid/embedgate
 go 1.26.2
 
 require (
-	github.com/impire-io/soulstream-core v0.11.0
+	github.com/impire-io/soulstream-core v0.11.1
 	github.com/impire-io/soulstream-identity v0.0.0
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats-server/v2 v2.14.3
