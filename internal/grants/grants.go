@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/impire-io/soulstream-identity/internal/sealedstore"
@@ -143,23 +144,36 @@ type Delegation struct {
 // Ed25519, the directory encoding). The broker side supplies the vault read.
 type SubjectKeyResolver func(subject string) (string, error)
 
-// Broker is the custody engine behind the grants.* ops.
+// Broker is the custody engine behind the grants.* ops. The catalog it
+// serves is mutable at runtime (D40): the statically declared list and the
+// store-held entries merge under one lock, and every ceremony path reads
+// through it.
 type Broker struct {
 	store      *sealedstore.Sealed
-	resources  map[string]Resource
 	provider   Provider
 	subjectKey SubjectKeyResolver
 	now        func() time.Time
+
+	mu        sync.RWMutex
+	resources map[string]Resource
+	// static names the resources declared in configuration — the
+	// operator's explicit hand, not editable through the op: that change
+	// belongs where the declaration lives.
+	static map[string]bool
 }
 
 // New builds a broker over a CAS store sealed with the deployment's first
 // key (the same seed the vault seals with — one custody root, two domains).
+// The starting catalog is the declared list merged with whatever resource
+// records the store holds (D40); a name both declared and stored is
+// refused loudly — remove one.
 func New(store Store, firstKeySeed string, resources []Resource, provider Provider, subjectKey SubjectKeyResolver) (*Broker, error) {
 	sealed, err := sealedstore.NewSealed(store, strings.TrimSpace(firstKeySeed))
 	if err != nil {
 		return nil, fmt.Errorf("grants: %w", err)
 	}
 	m := make(map[string]Resource, len(resources))
+	static := make(map[string]bool, len(resources))
 	for _, r := range resources {
 		if err := r.Validate(); err != nil {
 			return nil, err
@@ -168,24 +182,150 @@ func New(store Store, firstKeySeed string, resources []Resource, provider Provid
 			return nil, fmt.Errorf("grants: resource %s declared twice", r.Name)
 		}
 		m[r.Name] = r
+		static[r.Name] = true
 	}
-	return &Broker{
+	b := &Broker{
 		store:      sealed,
 		resources:  m,
+		static:     static,
 		provider:   provider,
 		subjectKey: subjectKey,
 		now:        time.Now,
-	}, nil
+	}
+	if err := b.loadStoredResources(); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func grantName(persona, resource string) string { return "grant/" + persona + "/" + resource }
 func linkName(persona, id string) string        { return "link/" + persona + "/" + id }
+func storedResourceName(name string) string     { return "resource/" + name }
+
+// resourceRecord is what rests sealed for a runtime-added resource: the
+// whole declaration, secret beside its public half — one record, never a
+// partial description (D39's own anti-split-brain rule, applied at rest).
+type resourceRecord struct {
+	Resource  Resource `json:"resource"`
+	UpdatedAt string   `json:"updated_at"`
+}
+
+// loadStoredResources merges the store-held catalog beside the declared one.
+func (b *Broker) loadStoredResources() error {
+	names, err := b.store.Names()
+	if err != nil {
+		return fmt.Errorf("grants: list stored resources: %w", err)
+	}
+	for _, name := range names {
+		short, ok := strings.CutPrefix(name, "resource/")
+		if !ok {
+			continue
+		}
+		var rec resourceRecord
+		if _, err := b.store.Get(name, &rec); err != nil {
+			return fmt.Errorf("grants: read stored resource %s: %w", short, err)
+		}
+		if b.static[short] {
+			return fmt.Errorf("grants: resource %s is both declared in configuration and stored — remove one", short)
+		}
+		b.resources[short] = rec.Resource
+	}
+	return nil
+}
+
+// resource is the one locked read every ceremony path goes through.
+func (b *Broker) resource(name string) (Resource, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	r, ok := b.resources[name]
+	return r, ok
+}
+
+// AddResource makes a resource usable at runtime (D40): validated exactly
+// like a declared one, persisted whole and sealed, live on return — no
+// restart anywhere. Re-adding a runtime resource replaces it; a statically
+// declared name refuses, by name.
+func (b *Broker) AddResource(r Resource) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.static[r.Name] {
+		return fmt.Errorf("grants: resource %s is declared in configuration — change it there", r.Name)
+	}
+	// The read is only for the revision: absent reads write as a create.
+	var prior resourceRecord
+	rev, err := b.store.Get(storedResourceName(r.Name), &prior)
+	if err != nil {
+		rev = 0
+	}
+	rec := resourceRecord{Resource: r, UpdatedAt: b.now().UTC().Format(time.RFC3339)}
+	if _, err := b.store.Put(storedResourceName(r.Name), rec, rev); err != nil {
+		return fmt.Errorf("grants: store resource %s: %w", r.Name, err)
+	}
+	b.resources[r.Name] = r
+	return nil
+}
+
+// RemoveResource retires a runtime resource: the next ceremony refuses by
+// the uniform not-found. Standing grants keep their custody — revoking is
+// each persona's own act, never a side effect of catalog editing. Removing
+// what is absent already happened; a declared resource refuses, by name.
+func (b *Broker) RemoveResource(name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.static[name] {
+		return fmt.Errorf("grants: resource %s is declared in configuration — change it there", name)
+	}
+	if _, ok := b.resources[name]; !ok {
+		return nil
+	}
+	if err := b.store.Delete(storedResourceName(name)); err != nil {
+		return fmt.Errorf("grants: delete resource %s: %w", name, err)
+	}
+	delete(b.resources, name)
+	return nil
+}
+
+// ResourceInfo is one catalog entry's public half — what resources.list
+// serves. The client secret has no public form anywhere.
+type ResourceInfo struct {
+	Name             string   `json:"name"`
+	AuthURL          string   `json:"auth_url,omitempty"`
+	TokenURL         string   `json:"token_url,omitempty"`
+	RevokeURL        string   `json:"revoke_url,omitempty"`
+	ClientID         string   `json:"client_id"`
+	Scopes           []string `json:"scopes,omitempty"`
+	RedirectURI      string   `json:"redirect_uri,omitempty"`
+	ExchangeTokenURL string   `json:"exchange_token_url,omitempty"`
+	ExchangeAudience string   `json:"exchange_audience,omitempty"`
+	// Declared says the entry came from configuration rather than the op.
+	Declared bool `json:"declared,omitempty"`
+}
+
+// Resources lists the catalog's public halves, sorted by name.
+func (b *Broker) Resources() []ResourceInfo {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	out := make([]ResourceInfo, 0, len(b.resources))
+	for name, r := range b.resources {
+		out = append(out, ResourceInfo{
+			Name: r.Name, AuthURL: r.AuthURL, TokenURL: r.TokenURL,
+			RevokeURL: r.RevokeURL, ClientID: r.ClientID, Scopes: r.Scopes,
+			RedirectURI: r.RedirectURI, ExchangeTokenURL: r.ExchangeTokenURL,
+			ExchangeAudience: r.ExchangeAudience, Declared: b.static[name],
+		})
+	}
+	slices.SortFunc(out, func(a, z ResourceInfo) int { return strings.Compare(a.Name, z.Name) })
+	return out
+}
 
 // ResourceIsExchange reports whether a declared resource rides lane 3.
 // Unknown resources answer false; the access path's uniform not-found
 // refusal stays the only signal.
 func (b *Broker) ResourceIsExchange(resource string) bool {
-	res, ok := b.resources[resource]
+	res, ok := b.resource(resource)
 	return ok && res.IsExchange()
 }
 
@@ -194,7 +334,7 @@ func (b *Broker) ResourceIsExchange(resource string) bool {
 // scoped to the resource's audience. No linking, no custody, nothing at
 // rest; the derived token is the only thing that moves.
 func (b *Broker) AccessExchange(ctx context.Context, resource, subjectToken string) (TokenSet, error) {
-	res, ok := b.resources[resource]
+	res, ok := b.resource(resource)
 	if !ok || !res.IsExchange() {
 		return TokenSet{}, ErrNotFound
 	}
@@ -207,7 +347,7 @@ func (b *Broker) AccessExchange(ctx context.Context, resource, subjectToken stri
 // LinkStart begins the consent ceremony: PKCE S256, the verifier custodied
 // sealed, the authorize URL returned for the persona's own browser.
 func (b *Broker) LinkStart(persona, resource string) (authorizeURL, linkID string, err error) {
-	res, ok := b.resources[resource]
+	res, ok := b.resource(resource)
 	if !ok {
 		return "", "", fmt.Errorf("grants: unknown resource %q", resource)
 	}
@@ -264,7 +404,12 @@ func (b *Broker) LinkComplete(ctx context.Context, persona, linkID, code string)
 	if exp, err := time.Parse(time.RFC3339, rec.Expires); err != nil || b.now().After(exp) {
 		return ErrLinkInvalid
 	}
-	res := b.resources[rec.Resource]
+	// The resource may have been retired between start and complete —
+	// runtime catalogs make that a real window, answered by name.
+	res, ok := b.resource(rec.Resource)
+	if !ok {
+		return fmt.Errorf("grants: resource %s was retired while this link was underway", rec.Resource)
+	}
 	tok, err := b.provider.Exchange(ctx, res, code, rec.Verifier)
 	if err != nil {
 		return fmt.Errorf("grants: code redemption for %s: %w", rec.Resource, err)
@@ -294,10 +439,10 @@ func (b *Broker) LinkComplete(ctx context.Context, persona, linkID, code string)
 // BEFORE returning the derived access token (D31's measured discipline).
 // A CAS loser serves its still-valid token and writes nothing.
 func (b *Broker) Access(ctx context.Context, persona, resource string) (TokenSet, error) {
-	if _, ok := b.resources[resource]; !ok {
+	res, ok := b.resource(resource)
+	if !ok {
 		return TokenSet{}, ErrNotFound
 	}
-	res := b.resources[resource]
 	// One contender wins each rotation round; the rest retry against the
 	// successor. Contention is bounded by time, not a fixed round count.
 	deadline := b.now().Add(5 * time.Second)
@@ -437,7 +582,7 @@ func (b *Broker) Revoke(ctx context.Context, persona, resource string) error {
 	if err := b.store.Delete(grantName(persona, resource)); err != nil {
 		return err
 	}
-	if res, ok := b.resources[resource]; ok && res.RevokeURL != "" {
+	if res, ok := b.resource(resource); ok && res.RevokeURL != "" {
 		_ = b.provider.Revoke(ctx, res, g.RefreshToken)
 	}
 	return nil

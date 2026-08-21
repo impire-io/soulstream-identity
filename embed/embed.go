@@ -96,9 +96,12 @@ type Options struct {
 	// on stderr.
 	Logger *slog.Logger
 
-	// GrantResources declares the outbound-grant resources (D34 lane 2);
-	// non-empty enables the grants.* ops. Value-only, like everything
-	// here — no per-user configuration exists (D26's spirit).
+	// GrantResources statically declares outbound-grant resources (D34
+	// lane 2). The grants.* ops are always on (D40): the catalog is
+	// runtime state, and resources.add extends this list live — a name
+	// declared here is the operator's explicit hand and refuses runtime
+	// edits. Value-only, like everything here — no per-user configuration
+	// exists (D26's spirit).
 	GrantResources []GrantResource
 
 	// GrantsBucket is the KV bucket holding sealed grant custody (its own
@@ -275,30 +278,31 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
-	// The grants half (D30/D31): enabled exactly when resources are
-	// declared; custody in its own sealed bucket, the same first key.
-	if len(o.GrantResources) > 0 {
-		grantsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.GrantsBucket})
-		if err != nil {
-			return fmt.Errorf("kv bucket %s: %w", o.GrantsBucket, err)
-		}
-		resources := make([]grants.Resource, len(o.GrantResources))
-		for i, r := range o.GrantResources {
-			resources[i] = grants.Resource(r)
-		}
-		broker, err := grants.New(grants.NewKVStore(grantsKV), o.FirstKey, resources, &grants.HTTPProvider{},
-			func(subject string) (string, error) {
-				e, err := v.Get(service.PersonaKeyPrefix + subject)
-				if err != nil {
-					return "", err
-				}
-				return e.PublicKey, nil
-			})
-		if err != nil {
-			return err
-		}
-		svcOpts = append(svcOpts, service.WithGrants(broker))
+	// The grants half (D30/D31, and D40's runtime catalog): always on —
+	// a deployment that declares nothing statically still serves
+	// resources.add and comes alive without a restart. Custody in its own
+	// sealed bucket, the same first key; declared resources merge with
+	// the store-held ones at startup, declaration winning a name loudly.
+	grantsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.GrantsBucket})
+	if err != nil {
+		return fmt.Errorf("kv bucket %s: %w", o.GrantsBucket, err)
 	}
+	resources := make([]grants.Resource, len(o.GrantResources))
+	for i, r := range o.GrantResources {
+		resources[i] = grants.Resource(r)
+	}
+	broker, err := grants.New(grants.NewKVStore(grantsKV), o.FirstKey, resources, &grants.HTTPProvider{},
+		func(subject string) (string, error) {
+			e, err := v.Get(service.PersonaKeyPrefix + subject)
+			if err != nil {
+				return "", err
+			}
+			return e.PublicKey, nil
+		})
+	if err != nil {
+		return err
+	}
+	svcOpts = append(svcOpts, service.WithGrants(broker))
 
 	// The secret store (tenancy.md D36): always on — the surface is
 	// principal-scoped, an empty domain costs nothing, and reachability

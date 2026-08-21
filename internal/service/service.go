@@ -475,6 +475,9 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		"grants.list", "grants.revoke":
 		return s.dispatchGrants(account, user, op, body)
 
+	case "resources.add", "resources.remove", "resources.list":
+		return s.dispatchResources(account, user, op, body)
+
 	case "secrets.put", "secrets.get", "secrets.list", "secrets.delete":
 		return s.dispatchSecrets(account, user, op, body)
 
