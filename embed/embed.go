@@ -36,6 +36,7 @@ import (
 	"github.com/impire-io/soulstream-identity/internal/sealedstore"
 	"github.com/impire-io/soulstream-identity/internal/secrets"
 	"github.com/impire-io/soulstream-identity/internal/service"
+	"github.com/impire-io/soulstream-identity/internal/tickets"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
 )
@@ -134,13 +135,26 @@ type Options struct {
 	// AccountsBucket is the KV bucket holding the sealed name→account
 	// records (D35). Default "SOULIDENTITY_ACCOUNTS".
 	AccountsBucket string
+
+	// TicketsBucket is the KV bucket holding sealed deferral tickets
+	// (approvals.md D42). Default "SOULIDENTITY_TICKETS". Tickets ride
+	// beside the guardrail: no evaluator, no tickets.
+	TicketsBucket string
+
+	// TicketTTL is a deferral's human-window (D42): how long a pending
+	// ticket invites a yes before expiring, witnessed. Default 1h. The
+	// approval TTL (minutes, in-memory, D38) is deliberately not this.
+	TicketTTL time.Duration
 }
 
-// GuardrailRule is one data-carried rule, by value.
+// GuardrailRule is one data-carried rule, by value. Approvers names who
+// may answer this rule's deferrals (approvals.md D45); empty keeps the
+// standing behaviour — any directory-resolvable persona.
 type GuardrailRule struct {
-	Name   string
-	When   string
-	Effect string
+	Name      string
+	When      string
+	Effect    string
+	Approvers []string
 }
 
 // GrantResource is one declared remote system, by value. The Exchange
@@ -181,6 +195,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.AccountsBucket == "" {
 		o.AccountsBucket = "SOULIDENTITY_ACCOUNTS"
+	}
+	if o.TicketsBucket == "" {
+		o.TicketsBucket = "SOULIDENTITY_TICKETS"
+	}
+	if o.TicketTTL == 0 {
+		o.TicketTTL = time.Hour
 	}
 	if o.CalloutTTL == 0 {
 		o.CalloutTTL = 15 * time.Minute
@@ -326,12 +346,26 @@ func Run(ctx context.Context, o Options) error {
 		}
 		rules := make([]guardrail.Rule, len(o.GuardrailRules))
 		for i, r := range o.GuardrailRules {
-			rules[i] = guardrail.Rule{Name: r.Name, When: r.When, Effect: guardrail.Effect(r.Effect)}
+			rules[i] = guardrail.Rule{Name: r.Name, When: r.When,
+				Effect: guardrail.Effect(r.Effect), Approvers: r.Approvers}
 		}
 		if err := eval.Load(rules); err != nil {
 			return err
 		}
 		svcOpts = append(svcOpts, service.WithGuardrail(eval))
+
+		// The deferral's custody (approvals.md D42): tickets ride beside
+		// the evaluator — durable, TTL-bounded, transitions witnessed —
+		// so the loop's human end has state to read and answer.
+		ticketsKV, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: o.TicketsBucket})
+		if err != nil {
+			return fmt.Errorf("kv bucket %s: %w", o.TicketsBucket, err)
+		}
+		ticketStore, err := tickets.New(sealedstore.NewKVStore(ticketsKV), o.FirstKey, o.TicketTTL)
+		if err != nil {
+			return err
+		}
+		svcOpts = append(svcOpts, service.WithTickets(ticketStore))
 	}
 
 	// The tenancy engine (D35): enabled exactly when the system-account

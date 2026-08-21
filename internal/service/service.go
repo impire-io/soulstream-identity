@@ -26,6 +26,7 @@ import (
 	"github.com/impire-io/soulstream-identity/internal/guardrail"
 	"github.com/impire-io/soulstream-identity/internal/mint"
 	"github.com/impire-io/soulstream-identity/internal/secrets"
+	"github.com/impire-io/soulstream-identity/internal/tickets"
 	"github.com/impire-io/soulstream-identity/internal/vault"
 	"github.com/impire-io/soulstream-identity/internal/version"
 )
@@ -110,6 +111,11 @@ type Service struct {
 	// Nil = those ops refuse.
 	accounts *accounts.Engine
 
+	// The ticket store (approvals.md D42): deferrals as durable,
+	// TTL-bounded state with witnessed transitions. Nil = deferrals stay
+	// stateless refusals, as before the design.
+	tickets *tickets.Store
+
 	// root is the subject root: <prefix>.<Segment>, bare Segment by default.
 	root string
 }
@@ -150,6 +156,15 @@ func WithSecrets(store *secrets.Service) Option {
 func WithGuardrail(e *guardrail.Evaluator) Option {
 	return func(s *Service) {
 		s.guardrail = e
+	}
+}
+
+// WithTickets custodies deferrals as durable tickets (D42) and brings
+// the approvals.status/pending/deny reads and acts alive beside the
+// evaluator.
+func WithTickets(store *tickets.Store) Option {
+	return func(s *Service) {
+		s.tickets = store
 	}
 }
 
@@ -481,7 +496,8 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 	case "secrets.put", "secrets.get", "secrets.list", "secrets.delete":
 		return s.dispatchSecrets(account, user, op, body)
 
-	case "guardrail.load", "approvals.present":
+	case "guardrail.load", "guardrail.list", "approvals.present",
+		"approvals.deny", "approvals.status", "approvals.pending":
 		return s.dispatchGuardrail(account, user, op, body)
 
 	case "accounts.create", "accounts.resolve", "accounts.list",

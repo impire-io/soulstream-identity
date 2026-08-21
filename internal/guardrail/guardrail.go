@@ -35,6 +35,11 @@ type Rule struct {
 	Name   string `json:"name"`
 	When   string `json:"when"` // CEL over {principal, action, args, now}
 	Effect Effect `json:"effect"`
+	// Approvers names who may approve this rule's deferrals (D45):
+	// persona names, checked at presentation beside the existing
+	// actor/binding/expiry checks. Empty keeps the standing behaviour —
+	// any directory-resolvable persona — stated rather than implied.
+	Approvers []string `json:"approvers,omitempty"`
 }
 
 // Input is one invocation at the chokepoint (B9): the server-proven
@@ -180,6 +185,32 @@ func (e *Evaluator) Evaluate(in Input) Decision {
 		return Decision{Effect: Defer, Rule: cr.rule.Name, InvocationID: id}
 	}
 	return Decision{Effect: Allow}
+}
+
+// Rules returns the standing rule set as loaded — the read half
+// guardrail.load never had (D43), for a surface that keeps no copy.
+func (e *Evaluator) Rules() []Rule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	out := make([]Rule, len(e.rules))
+	for i, cr := range e.rules {
+		out[i] = cr.rule
+	}
+	return out
+}
+
+// RuleNamed returns one standing rule by name — presentation consults the
+// deciding rule's approvers clause (D45) against the CURRENT set: policy
+// governs at the moment of the yes, not the moment of the ask.
+func (e *Evaluator) RuleNamed(name string) (Rule, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, cr := range e.rules {
+		if cr.rule.Name == name {
+			return cr.rule, true
+		}
+	}
+	return Rule{}, false
 }
 
 // Approve records a granted approval for one invocation: usable exactly
