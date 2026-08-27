@@ -77,6 +77,11 @@ func ValidatePrefix(prefix string) error {
 // the key's own owner binding (D6 as amended, D25).
 const PersonaKeyPrefix = "persona/"
 
+// SealingKeyPrefix is the vault-name convention for persona sealing keys
+// (sealing-keys.md D50): persona <p> unwraps with vault key "sealing/<p>",
+// owner-bound exactly like its signing key.
+const SealingKeyPrefix = "sealing/"
+
 // Service wires the vault behind the sealed NATS surface.
 type Service struct {
 	vault      *vault.Vault
@@ -276,6 +281,19 @@ type signRecordResponse struct {
 	PublicKey string `json:"public_key"`
 }
 
+type sealUnwrapRequest struct {
+	Key     string `json:"key"`
+	Wrapped []byte `json:"wrapped"` // the anonymous sealed box, whole
+}
+
+// sealUnwrapResponse releases the unwrapped ARTIFACT (an epoch key, a
+// sealed notify body) — never key material (sealing-keys.md D51). It
+// rides the sealed transport envelope like every response.
+type sealUnwrapResponse struct {
+	Secret    []byte `json:"secret"`
+	PublicKey string `json:"public_key"` // the sealing key's public half
+}
+
 type mintRequest struct {
 	Account     string `json:"account"`
 	User        string `json:"user"`
@@ -403,12 +421,41 @@ func (s *Service) dispatch(account, user, op string, body []byte) (any, error) {
 		if err := unmarshalStrict(body, &req); err != nil {
 			return nil, err
 		}
-		entry, err := s.personaKeyPublic(account, user, req.Key)
+		// One directory door, two grammars (D52): persona signing keys
+		// and persona sealing keys resolve through the same open read.
+		var entry vault.Entry
+		var err error
+		if strings.HasPrefix(req.Key, SealingKeyPrefix) {
+			entry, err = s.sealingKeyPublic(account, user, req.Key)
+		} else {
+			entry, err = s.personaKeyPublic(account, user, req.Key)
+		}
 		if err != nil {
 			return nil, err
 		}
 		s.allow(account, user, op, "key", entry.Name)
 		return entry, nil
+
+	case "seal.unwrap":
+		var req sealUnwrapRequest
+		if err := unmarshalStrict(body, &req); err != nil {
+			return nil, err
+		}
+		entry, err := s.ownedSealingKey(account, user, req.Key)
+		if err != nil {
+			return nil, err
+		}
+		secret, err := s.vault.Unwrap(req.Key, req.Wrapped)
+		if err != nil {
+			return nil, err
+		}
+		if len(secret) == 0 {
+			return nil, fmt.Errorf("service: unwrap produced nothing — refusing an empty artifact")
+		}
+		// Audited with the length, never the bytes (D51).
+		s.allow(account, user, op, "persona", strings.TrimPrefix(req.Key, SealingKeyPrefix),
+			"wrapped_len", len(req.Wrapped))
+		return sealUnwrapResponse{Secret: secret, PublicKey: entry.PublicKey}, nil
 
 	case "sign.record":
 		var req signRecordRequest
@@ -551,11 +598,53 @@ func (s *Service) personaKeyPublic(account, user, key string) (vault.Entry, erro
 		return s.ownedPersonaKey(account, user, key)
 	}
 	if !strings.HasPrefix(key, PersonaKeyPrefix) {
-		return vault.Entry{}, fmt.Errorf("service: persona keys are named %s<persona>, got %q", PersonaKeyPrefix, key)
+		return vault.Entry{}, fmt.Errorf("service: keys are named %s<persona> or %s<persona>, got %q", PersonaKeyPrefix, SealingKeyPrefix, key)
 	}
 	entry, err := s.vault.Get(key)
 	if err != nil || entry.Kind != vault.KindPersonaSigningKey {
 		return vault.Entry{}, fmt.Errorf("service: no persona key %q", key)
+	}
+	return entry, nil
+}
+
+// ownedSealingKey is ownedPersonaKey's sealing mirror (sealing-keys.md
+// D50/D51): the caller's OWN sealing key (sealing/<user>) materializes on
+// first touch; any other key refuses identically whether it exists or not
+// — the refusal must not probe the vault.
+func (s *Service) ownedSealingKey(account, user, key string) (vault.Entry, error) {
+	refuse := fmt.Errorf("service: %s/%s has no sealing key %q", account, user, key)
+	if !strings.HasPrefix(key, SealingKeyPrefix) {
+		return vault.Entry{}, fmt.Errorf("service: sealing keys are named %s<persona>, got %q", SealingKeyPrefix, key)
+	}
+	if key == SealingKeyPrefix+user {
+		entry, err := s.vault.GenerateSealingKey(key, account, user)
+		if err != nil {
+			// Exists under another owner: first owner wins (D26's named
+			// cost, carried to sealing by D50).
+			return vault.Entry{}, refuse
+		}
+		return entry, nil
+	}
+	entry, err := s.vault.Get(key)
+	if err != nil {
+		return vault.Entry{}, refuse
+	}
+	if entry.Kind != vault.KindPersonaSealingKey || entry.Account != account || entry.User != user {
+		return vault.Entry{}, refuse
+	}
+	return entry, nil
+}
+
+// sealingKeyPublic is the sealing half of the directory read (D52): the
+// caller's own sealing key materializes; any persona's sealing public
+// half is an open read — wrap targets come from the directory.
+func (s *Service) sealingKeyPublic(account, user, key string) (vault.Entry, error) {
+	if key == SealingKeyPrefix+user {
+		return s.ownedSealingKey(account, user, key)
+	}
+	entry, err := s.vault.Get(key)
+	if err != nil || entry.Kind != vault.KindPersonaSealingKey {
+		return vault.Entry{}, fmt.Errorf("service: no sealing key %q", key)
 	}
 	return entry, nil
 }

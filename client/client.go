@@ -44,6 +44,7 @@ const (
 	KindNATSUserKey           = "nats-user-key"
 	KindNATSOperatorKey       = "nats-operator-key"
 	KindPersonaSigningKey     = "persona-signing-key"
+	KindPersonaSealingKey     = "persona-sealing-key"
 )
 
 // MintResult is a minted user JWT; Creds is present only when the custody
@@ -317,6 +318,84 @@ func (s *PersonaSigner) Sign(canonical []byte) (string, error) {
 		return "", errors.New("soulstream-identity: service returned an empty signature")
 	}
 	return sig, nil
+}
+
+// SealingKeyName is the vault name of a persona's X25519 sealing key
+// (sealing-keys.md D50); the key's owner binding is what seal.unwrap is
+// enforced against.
+func SealingKeyName(persona string) string {
+	return "sealing/" + persona
+}
+
+// SealingPublicKey returns any persona's sealing public key (base64 raw
+// X25519, core's SealingKey encoding) — the directory read's sealing half
+// (D52): wrap targets resolve from the vault that custodies the keys. The
+// caller's own sealing key materializes on first touch.
+func (c *Client) SealingPublicKey(persona string) (string, error) {
+	var out Key
+	err := c.call("keys.public", map[string]string{"key": SealingKeyName(persona)}, &out)
+	return out.PublicKey, err
+}
+
+// PersonaUnwrapper is the persona bound to an unwrapping capability: the
+// shape of soulstream's identity.Unwrapper seam (PublicKey() string;
+// Unwrap(wrapped []byte) ([]byte, error)), satisfied structurally — this
+// package imports nothing of soulstream and soulstream nothing of it; a
+// consumer wires the two, and pairs construction with the F1-style
+// ensure-publication of the endorsed public half (sealing-keys.md D53:
+// registry.EnsureSealingKey with the custodial PersonaSigner as endorser;
+// the signing key publishes first). Safe for concurrent use: every Unwrap
+// is an independent sealed round trip; deadlines are the Client's
+// per-request timeout, owned here as the seam requires.
+type PersonaUnwrapper struct {
+	c       *Client
+	persona string
+	pub     string
+}
+
+// PersonaUnwrapper binds persona to its unwrapper, resolving the sealing
+// public key once through keys.public. The client principal's own sealing
+// key materializes in the vault on this first touch (D50) — no
+// provisioning act preceded it. Construction fails when the sealing key
+// is owned by another principal, so a mis-wired unwrapper fails fast, not
+// at first materialise.
+func (c *Client) PersonaUnwrapper(persona string) (*PersonaUnwrapper, error) {
+	var out Key
+	if err := c.call("keys.public", map[string]string{"key": SealingKeyName(persona)}, &out); err != nil {
+		return nil, err
+	}
+	if out.PublicKey == "" {
+		return nil, errors.New("soulstream-identity: keys.public returned no sealing public key")
+	}
+	if out.Account != c.account || out.User != c.user {
+		return nil, fmt.Errorf("soulstream-identity: sealing key of %q is owned by another principal — this client unwraps only with its own key", persona)
+	}
+	return &PersonaUnwrapper{c: c, persona: persona, pub: out.PublicKey}, nil
+}
+
+// PublicKey returns the sealing key's public half (std base64 of the 32
+// raw X25519 bytes) — the wrap target consumers endorse into the realm
+// registry (D53).
+func (u *PersonaUnwrapper) PublicKey() string { return u.pub }
+
+// Unwrap opens a secret wrapped to this persona's sealing key — one
+// sealed round trip; the vault does the cryptography and releases only
+// the artifact (D51). It never returns (nil, nil): an empty result is an
+// unwrapping failure (the seam's contract).
+func (u *PersonaUnwrapper) Unwrap(wrapped []byte) ([]byte, error) {
+	var out struct {
+		Secret    []byte `json:"secret"`
+		PublicKey string `json:"public_key"`
+	}
+	if err := u.c.call("seal.unwrap", map[string]any{
+		"key": SealingKeyName(u.persona), "wrapped": wrapped,
+	}, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Secret) == 0 {
+		return nil, errors.New("soulstream-identity: service returned an empty unwrapped secret")
+	}
+	return out.Secret, nil
 }
 
 // Mint issues a durable user JWT for (account, user) — an operator op:
