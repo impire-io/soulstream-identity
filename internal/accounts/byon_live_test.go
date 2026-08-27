@@ -107,6 +107,25 @@ func TestBar1ProviderArm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create the AUTH stand-in: %v", err)
 	}
+	// A faithful stand-in is a callout account: the JWT rule refuses
+	// allowed_accounts without auth_users, so seed one throwaway auth
+	// user before the coupling writes to it (measured 2026-08-27: a bare
+	// stand-in drew 400 Bad Request on the first amend).
+	calloutKP, _ := nkeys.CreateUser()
+	calloutPub, _ := calloutKP.PublicKey()
+	standIn, err := authority.accountByPublicKey(ctx, authRec.PublicKey)
+	if err != nil || standIn == nil {
+		t.Fatalf("find the AUTH stand-in: %v", err)
+	}
+	if _, _, err := client.AccountAPI.UpdateAccount(ctx, standIn.Id).
+		AccountUpdateRequest(syncp.AccountUpdateRequest{JwtSettings: &syncp.AccountJWTSettingsPatch{
+			Authorization: &syncp.Nullable[syncp.ExternalAuthorizationPatch]{
+				Val:         syncp.ExternalAuthorizationPatch{AuthUsers: []string{calloutPub}},
+				ZeroIsValid: true,
+			},
+		}}).Execute(); err != nil {
+		t.Fatalf("seed the stand-in's auth_users: %v", err)
+	}
 	authority.AuthAccount = authRec.PublicKey
 
 	// The pre-existing account, and a probe that must never falter.

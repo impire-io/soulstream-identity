@@ -205,8 +205,9 @@ func (p *ProviderAPI) accountByPublicKey(ctx context.Context, pub string) (*sync
 }
 
 // amendAuthAllowed is the provider-side D47 coupling: read the AUTH
-// account's current allowed_accounts from its JWT settings, union in
-// the tenant, and patch — idempotent, the custodian the only writer.
+// account's whole authorization object from its JWT settings, union
+// the tenant into allowed_accounts, and write the object back —
+// idempotent, the custodian the only writer.
 func (p *ProviderAPI) amendAuthAllowed(ctx context.Context, tenantPub string) error {
 	auth, err := p.accountByPublicKey(ctx, p.AuthAccount)
 	if err != nil {
@@ -224,19 +225,33 @@ func (p *ProviderAPI) amendAuthAllowed(ctx context.Context, tenantPub string) er
 	}); err != nil {
 		return err
 	}
-	var current []string
-	if view != nil && view.JwtSettings != nil && view.JwtSettings.Authorization != nil {
-		current = view.JwtSettings.Authorization.AllowedAccounts
+	var authz *syncp.ExternalAuthorization
+	if view != nil && view.JwtSettings != nil {
+		authz = view.JwtSettings.Authorization
 	}
-	for _, a := range current {
+	// The JWT rule (nats-io/jwt): external authorization cannot have
+	// accounts without users. An AUTH with no auth_users is not a
+	// callout account and no allowed_accounts write on it can ever be
+	// valid — the control plane answers 400.
+	if authz == nil || len(authz.AuthUsers) == 0 {
+		return fmt.Errorf("accounts: AUTH %s has no auth_users — not a callout account, allowed_accounts cannot be set on it", p.AuthAccount)
+	}
+	for _, a := range authz.AllowedAccounts {
 		if a == tenantPub {
 			return nil
 		}
 	}
-	allowed := append(append([]string{}, current...), tenantPub)
+	allowed := append(append([]string{}, authz.AllowedAccounts...), tenantPub)
+	// The whole authorization object is written back — auth_users and
+	// xkey carried forward — so the write stays valid whether the
+	// control plane merges the patch per field or replaces the object.
 	patch := syncp.AccountJWTSettingsPatch{
 		Authorization: &syncp.Nullable[syncp.ExternalAuthorizationPatch]{
-			Val: syncp.ExternalAuthorizationPatch{AllowedAccounts: allowed}, ZeroIsValid: true,
+			Val: syncp.ExternalAuthorizationPatch{
+				AllowedAccounts: allowed,
+				AuthUsers:       authz.AuthUsers,
+				Xkey:            authz.Xkey,
+			}, ZeroIsValid: true,
 		},
 	}
 	if err := cpRetry(ctx, "amend AUTH allowed_accounts", func() (*http.Response, error) {
