@@ -29,6 +29,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/impire-io/soulstream-identity/client"
 	"github.com/impire-io/soulstream-identity/internal/accounts"
 	"github.com/impire-io/soulstream-identity/internal/callout"
 	"github.com/impire-io/soulstream-identity/internal/grants"
@@ -376,7 +377,15 @@ func Run(ctx context.Context, o Options) error {
 			return fmt.Errorf("kv bucket %s: %w", o.AccountsBucket, err)
 		}
 		engine, err := accounts.New(sealedstore.NewKVStore(accountsKV), o.FirstKey,
-			&accounts.LocalOperator{Vault: v, OperatorKeyName: o.OperatorKeyName, Sys: o.SystemConn})
+			&accounts.LocalOperator{Vault: v, OperatorKeyName: o.OperatorKeyName, Sys: o.SystemConn,
+				// D47: created tenants are born admissible — the persona
+				// template on a scoped signer, rendered at this deployment's
+				// prefix, and AUTH learning each tenant. AuthAccount empty
+				// (no callout half) skips the coupling: no admission list
+				// exists to maintain.
+				AuthAccount: o.AuthAccount,
+				ScopePub:    client.PersonaScopePubAllow(o.Prefix),
+				ScopeSub:    client.PersonaScopeSubAllow(o.Prefix)})
 		if err != nil {
 			return err
 		}

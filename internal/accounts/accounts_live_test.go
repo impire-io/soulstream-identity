@@ -3,6 +3,8 @@ package accounts
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,11 +37,28 @@ func TestAccountLifecycleLive(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// An AUTH account with callout enabled and an empty allowed_accounts:
+	// the D47 coupling under test is that creation teaches it each tenant.
+	authKP, _ := nkeys.CreateAccount()
+	authPub, _ := authKP.PublicKey()
+	issuerUserKP, _ := nkeys.CreateUser()
+	issuerUserPub, _ := issuerUserKP.PublicKey()
+	authClaims := jwt.NewAccountClaims(authPub)
+	authClaims.Name = "AUTH"
+	authClaims.EnableExternalAuthorization(issuerUserPub)
+	authJWT, err := authClaims.Encode(opKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	res, err := natsserver.NewDirAccResolver(t.TempDir(), 1000, time.Minute, natsserver.NoDelete)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := res.Store(sysPub, sysJWT); err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Store(authPub, authJWT); err != nil {
 		t.Fatal(err)
 	}
 	oc := jwt.NewOperatorClaims(opPub)
@@ -95,7 +114,8 @@ func TestAccountLifecycleLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine, err := New(sealedstore.NewMemStore(), string(firstSeed),
-		&LocalOperator{Vault: v, OperatorKeyName: "operator/root", Sys: sysConn})
+		&LocalOperator{Vault: v, OperatorKeyName: "operator/root", Sys: sysConn,
+			AuthAccount: authPub})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +139,11 @@ func TestAccountLifecycleLive(t *testing.T) {
 		t.Fatalf("reuse: %v", err)
 	}
 
-	// A principal in the new account connects and completes a round trip.
+	// A principal in the new account connects THE WAY THE MINT SHAPES IT
+	// (SetScoped, permission-less — D5) and completes a round trip inside
+	// the persona scope. Before D47 this user was admitted but inert
+	// (scoped user on a plain key: 0 subscriptions, 0 payload) — the
+	// subscribe below is the assertion that kills that defect.
 	skKP, err := nkeys.FromSeed([]byte(signingSeed))
 	if err != nil {
 		t.Fatal(err)
@@ -130,30 +154,68 @@ func TestAccountLifecycleLive(t *testing.T) {
 	uc := jwt.NewUserClaims(userPub)
 	uc.Name = "alice"
 	uc.IssuerAccount = rec.PublicKey
+	uc.SetScoped(true)
+	uc.Expires = time.Now().Add(15 * time.Minute).Unix()
 	userJWT, err := uc.Encode(skKP)
 	if err != nil {
 		t.Fatal(err)
 	}
+	violations := make(chan error, 4)
 	dial := func() (*nats.Conn, error) {
 		return nats.Connect(srv.ClientURL(), nats.UserJWTAndSeed(userJWT, string(userSeed)),
-			nats.RetryOnFailedConnect(false), nats.MaxReconnects(0))
+			nats.RetryOnFailedConnect(false), nats.MaxReconnects(0),
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, e error) {
+				select {
+				case violations <- e:
+				default:
+				}
+			}))
 	}
 	nc, err := dial()
 	if err != nil {
 		t.Fatalf("admission into the born account: %v", err)
 	}
-	sub, err := nc.SubscribeSync("ping")
+	sub, err := nc.SubscribeSync("SOULSTREAM.ping")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("scoped user cannot subscribe (the inert-tenant defect): %v", err)
 	}
-	if err := nc.Publish("ping", []byte("x")); err != nil {
+	if err := nc.Publish("SOULSTREAM.ping", []byte("x")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sub.NextMsg(2 * time.Second); err != nil {
 		t.Fatalf("round trip in the born account: %v", err)
 	}
+	t.Logf("store -> usable-admission round trip in %v", time.Since(born))
+
+	// The template bounds the user: a publish outside the persona scope
+	// draws a server-side permissions violation (never silence).
+	if err := nc.Publish("foreign.subject", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	_ = nc.FlushTimeout(2 * time.Second)
+	select {
+	case e := <-violations:
+		if e == nil || !strings.Contains(strings.ToLower(e.Error()), "permissions violation") {
+			t.Fatalf("expected a permissions violation outside the scope, got: %v", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("publish outside the persona scope drew no permissions violation — the template is not applied")
+	}
 	nc.Close()
-	t.Logf("store -> admitted round trip in %v", time.Since(born))
+
+	// The D47 coupling: AUTH's stored JWT now lists the tenant, so the
+	// callout may place users into it (D21's explicit allowed_accounts).
+	lookup, err := sysConn.Request(fmt.Sprintf("$SYS.REQ.ACCOUNT.%s.CLAIMS.LOOKUP", authPub), nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("auth lookup: %v", err)
+	}
+	authNow, err := jwt.DecodeAccountClaims(string(lookup.Data))
+	if err != nil {
+		t.Fatalf("auth decode: %v", err)
+	}
+	if !authNow.Authorization.AllowedAccounts.Contains(rec.PublicKey) {
+		t.Fatalf("AUTH allowed_accounts did not learn the tenant: %v", authNow.Authorization.AllowedAccounts)
+	}
 
 	// Suspension refuses the next connection; the record and data stay.
 	if _, err := engine.SetSuspended(ctx, "acme", true); err != nil {
