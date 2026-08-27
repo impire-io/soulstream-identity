@@ -39,3 +39,45 @@ func PersonaScopePubAllow(prefix string) []string {
 func PersonaScopeSubAllow(_ string) []string {
 	return []string{"_INBOX.>", "SOULSTREAM.>"}
 }
+
+// AgentScopeRole is the scoped-signer role label a deployment's agent-role
+// signing key carries. The signing key is imported into the vault under the
+// deployment's chosen role name (D24 binding); D28's mint.ephemeral selects
+// it by that name and the server clamps every minted workload to the
+// template below.
+const AgentScopeRole = "soulstream-agent"
+
+// AgentScopePubAllow returns the publish allow-list of the canonical agent
+// scope (hq design 0005 §5): the workloads runtime's agent permission
+// derivation with the dynamic parts as scoped-signer tag functions —
+// `{{tag(topic)}}` and `{{tag(tool)}}` resolve from the mint's tags, so the
+// template is the entire policy and a workload reaches exactly what its
+// declaration named. The tag keys (`tool`, `topic`, `persona`) are
+// dual-written in the workloads repo's minter (the cycle guard forbids a
+// shared constant); the product's consumer-position e2e is the drift court.
+// A tag function must NEVER appear in a deny list — a missing tag would
+// fail authorization outright instead of dropping the line. The prefix
+// parameter is accepted for symmetry; the record's subjects carry no
+// ecosystem prefix.
+func AgentScopePubAllow(_ string) []string {
+	return []string{
+		"SOULSTREAM.TOPICS.OPS.{{tag(topic)}}",
+		"SOULSTREAM.PERSONA.NOTIFY.*",
+		"SOULSTREAM.SVC.{{tag(tool)}}",
+		"_INBOX.>",
+		"$JS.API.INFO",
+	}
+}
+
+// AgentScopeSubAllow returns the subscribe allow-list of the canonical
+// agent scope. The notify subject rides `{{name()}}` — under D28 the
+// persona IS the minted user's name, so reachability cannot drift from
+// attribution (the `persona:` tag still stamps into the claims for audit).
+func AgentScopeSubAllow(_ string) []string {
+	return []string{
+		"SOULSTREAM.TOPICS.OPS.{{tag(topic)}}",
+		"SOULSTREAM.TOPICS.INFO.>",
+		"SOULSTREAM.PERSONA.NOTIFY.{{name()}}",
+		"_INBOX.>",
+	}
+}
