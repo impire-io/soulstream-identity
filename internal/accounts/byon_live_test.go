@@ -87,17 +87,27 @@ func TestBar1ProviderArm(t *testing.T) {
 	}
 
 	stamp := time.Now().UTC().Format("150405")
-	nameA := "bar1-probe-a-" + stamp // the pre-existing account
-	nameB := "bar1-probe-b-" + stamp // born inside the measured window
+	nameAuth := "bar1-probe-auth-" + stamp // the throwaway AUTH stand-in (D47 coupling)
+	nameA := "bar1-probe-a-" + stamp       // the pre-existing account
+	nameB := "bar1-probe-b-" + stamp       // born inside the measured window
 	t.Cleanup(func() {
 		// The API context carries the base URL and token — a bare
 		// Background() cannot reach the control plane at all.
-		for _, n := range []string{nameA, nameB} {
+		for _, n := range []string{nameA, nameB, nameAuth} {
 			if err := authority.Delete(ctx, n); err != nil {
 				t.Logf("cleanup %s: %v", n, err)
 			}
 		}
 	})
+
+	// D47's coupling, measured against the real control plane without
+	// touching the system's actual AUTH account: a throwaway stand-in is
+	// born first (coupling off), then every later creation must teach it.
+	authRec, _, err := engine.Create(ctx, nameAuth)
+	if err != nil {
+		t.Fatalf("create the AUTH stand-in: %v", err)
+	}
+	authority.AuthAccount = authRec.PublicKey
 
 	// The pre-existing account, and a probe that must never falter.
 	bornA := time.Now()
@@ -164,6 +174,33 @@ func TestBar1ProviderArm(t *testing.T) {
 		t.Fatalf("round trip in the newborn account: %v", err)
 	}
 
+	// The D47 coupling, read back from the control plane: the stand-in
+	// AUTH's allowed_accounts learned BOTH tenants born after it.
+	authView, err := authority.accountByPublicKey(ctx, authRec.PublicKey)
+	if err != nil || authView == nil {
+		t.Fatalf("find the AUTH stand-in: %v", err)
+	}
+	full, _, err := client.AccountAPI.GetAccount(ctx, authView.Id).Execute()
+	if err != nil {
+		t.Fatalf("get the AUTH stand-in: %v", err)
+	}
+	var allowed []string
+	if full.JwtSettings != nil && full.JwtSettings.Authorization != nil {
+		allowed = full.JwtSettings.Authorization.AllowedAccounts
+	}
+	for _, want := range []string{recA.PublicKey, recB.PublicKey} {
+		found := false
+		for _, a := range allowed {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("AUTH stand-in allowed_accounts missing %s (have %v)", want, allowed)
+		}
+	}
+	t.Logf("AUTH stand-in learned both tenants: %v", allowed)
+
 	// Suspension and resume through the provider API.
 	if _, err := engine.SetSuspended(ctx, nameB, true); err != nil {
 		t.Fatalf("suspend: %v", err)
@@ -205,6 +242,11 @@ func roundTripInAccount(t *testing.T, accountPub, signingSeed string) error {
 	uc := jwt.NewUserClaims(uPub)
 	uc.Name = "bar1-probe"
 	uc.IssuerAccount = accountPub
+	// The mint shape (D5/D47): scoped, permission-less — the signing-key
+	// group's scope is the whole policy. Before D47 the group was plain
+	// and this user connected inert; the round trip below is the proof.
+	uc.SetScoped(true)
+	uc.Expires = time.Now().Add(15 * time.Minute).Unix()
 	token, err := uc.Encode(skKP)
 	if err != nil {
 		return fmt.Errorf("mint user: %w", err)
@@ -227,17 +269,18 @@ func roundTripInAccount(t *testing.T, accountPub, signingSeed string) error {
 	}
 	defer nc.Close()
 
-	sub, err := nc.SubscribeSync("bar1.probe")
+	// Inside the persona scope: subscribe + publish must round-trip.
+	sub, err := nc.SubscribeSync("SOULSTREAM.bar1.probe")
 	if err != nil {
-		return err
+		return fmt.Errorf("scoped user cannot subscribe (the inert defect): %w", err)
 	}
-	if err := nc.Publish("bar1.probe", []byte("alive")); err != nil {
+	if err := nc.Publish("SOULSTREAM.bar1.probe", []byte("alive")); err != nil {
 		return err
 	}
 	msg, err := sub.NextMsg(10 * time.Second)
 	if err != nil {
 		return fmt.Errorf("round trip: %w", err)
 	}
-	t.Logf("round trip in the newborn account: %q", msg.Data)
+	t.Logf("scoped round trip in the newborn account: %q", msg.Data)
 	return nil
 }

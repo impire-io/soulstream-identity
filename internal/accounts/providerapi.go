@@ -22,6 +22,8 @@ import (
 
 	"github.com/nats-io/nkeys"
 	"github.com/synadia-io/control-plane-sdk-go/syncp"
+
+	"github.com/impire-io/soulstream-identity/client"
 )
 
 // The control plane is a lossy channel: a just-created account's next
@@ -64,6 +66,33 @@ type ProviderAPI struct {
 	GroupName string
 	// Log receives progress lines. Optional.
 	Log func(format string, args ...any)
+
+	// AuthAccount is the AUTH account public key (A…) whose
+	// allowed_accounts learns each created tenant (D47 — parity with
+	// the local arm). Empty skips the coupling: no callout half, no
+	// admission list to maintain.
+	AuthAccount string
+
+	// ScopePub and ScopeSub are the persona template rendered onto the
+	// tenant's signing-key group as its scope (D47 — without it the
+	// group is plain and every SetScoped mint is admitted but inert).
+	// Nil defaults to the canonical persona scope at the bare prefix.
+	ScopePub []string
+	ScopeSub []string
+}
+
+func (p *ProviderAPI) scopePub() []string {
+	if p.ScopePub != nil {
+		return p.ScopePub
+	}
+	return client.PersonaScopePubAllow("")
+}
+
+func (p *ProviderAPI) scopeSub() []string {
+	if p.ScopeSub != nil {
+		return p.ScopeSub
+	}
+	return client.PersonaScopeSubAllow("")
 }
 
 func (p *ProviderAPI) groupName() string {
@@ -120,6 +149,15 @@ func (p *ProviderAPI) CreateAccount(ctx context.Context, name string) (string, s
 		g, resp, err := p.Client.AccountAPI.CreateAccountSkGroup(ctx, created.Id).
 			SigningKeyGroupCreateRequest(syncp.SigningKeyGroupCreateRequest{
 				Name: p.groupName(), Programmatic: true,
+				// D47: the group carries the persona template as its
+				// scope — a plain group leaves every SetScoped mint
+				// admitted but inert (0 subscriptions, 0 payload).
+				Scope: &syncp.UserPermissionLimits{
+					Permissions: syncp.Permissions{
+						Pub: &syncp.Permission{Allow: p.scopePub()},
+						Sub: &syncp.Permission{Allow: p.scopeSub()},
+					},
+				},
 			}).Execute()
 		group = g
 		return resp, err
@@ -140,7 +178,76 @@ func (p *ProviderAPI) CreateAccount(ctx context.Context, name string) (string, s
 		return "", "", "", fmt.Errorf("accounts: signing-key public half for %s: %w", name, err)
 	}
 	// The seed leaves this scope for the vault immediately.
-	return deref(created.AccountPublicKey), signingPub, *group.Seed, nil
+	acctPub := deref(created.AccountPublicKey)
+
+	// D47's coupling, provider-side: AUTH learns the tenant. Tenant
+	// first, AUTH second — the between-acts window fails closed.
+	if p.AuthAccount != "" {
+		if err := p.amendAuthAllowed(ctx, acctPub); err != nil {
+			return "", "", "", fmt.Errorf("accounts: tenant %s landed but AUTH did not learn it (allowed_accounts unamended): %w", name, err)
+		}
+	}
+	return acctPub, signingPub, *group.Seed, nil
+}
+
+// accountByPublicKey finds an account in the system by its public key.
+func (p *ProviderAPI) accountByPublicKey(ctx context.Context, pub string) (*syncp.AccountViewResponse, error) {
+	accounts, _, err := p.Client.SystemAPI.ListAccounts(ctx, p.SystemID).Execute()
+	if err != nil {
+		return nil, fmt.Errorf("accounts: list accounts: %w", err)
+	}
+	for i, a := range accounts.Items {
+		if deref(a.AccountPublicKey) == pub {
+			return &accounts.Items[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// amendAuthAllowed is the provider-side D47 coupling: read the AUTH
+// account's current allowed_accounts from its JWT settings, union in
+// the tenant, and patch — idempotent, the custodian the only writer.
+func (p *ProviderAPI) amendAuthAllowed(ctx context.Context, tenantPub string) error {
+	auth, err := p.accountByPublicKey(ctx, p.AuthAccount)
+	if err != nil {
+		return err
+	}
+	if auth == nil {
+		return fmt.Errorf("%w: AUTH account %s at the provider", ErrNotFound, p.AuthAccount)
+	}
+	// The list view can omit jwt_settings; fetch the account whole.
+	var view *syncp.AccountViewResponse
+	if err := cpRetry(ctx, "get AUTH account", func() (*http.Response, error) {
+		v, resp, err := p.Client.AccountAPI.GetAccount(ctx, auth.Id).Execute()
+		view = v
+		return resp, err
+	}); err != nil {
+		return err
+	}
+	var current []string
+	if view != nil && view.JwtSettings != nil && view.JwtSettings.Authorization != nil {
+		current = view.JwtSettings.Authorization.AllowedAccounts
+	}
+	for _, a := range current {
+		if a == tenantPub {
+			return nil
+		}
+	}
+	allowed := append(append([]string{}, current...), tenantPub)
+	patch := syncp.AccountJWTSettingsPatch{
+		Authorization: &syncp.Nullable[syncp.ExternalAuthorizationPatch]{
+			Val: syncp.ExternalAuthorizationPatch{AllowedAccounts: allowed}, ZeroIsValid: true,
+		},
+	}
+	if err := cpRetry(ctx, "amend AUTH allowed_accounts", func() (*http.Response, error) {
+		_, resp, err := p.Client.AccountAPI.UpdateAccount(ctx, auth.Id).
+			AccountUpdateRequest(syncp.AccountUpdateRequest{JwtSettings: &patch}).Execute()
+		return resp, err
+	}); err != nil {
+		return err
+	}
+	p.logf("AUTH %s allowed_accounts += %s", p.AuthAccount, tenantPub)
+	return nil
 }
 
 // SetSuspended implements Authority: drop the account's connection
