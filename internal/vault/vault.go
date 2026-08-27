@@ -8,6 +8,7 @@ package vault
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"sync"
 
 	"github.com/nats-io/nkeys"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/nacl/box"
 )
 
 // Kind names what a vault entry is and thus how it signs.
@@ -35,6 +38,12 @@ const (
 	// account JWTs — the account-creating authority's root (tenancy.md D35).
 	// No binding: the operator stands above accounts.
 	KindNATSOperatorKey Kind = "nats-operator-key"
+	// KindPersonaSealingKey is a Soulstream persona's X25519 sealing seed
+	// (base64, 32 bytes — core's SealingKey encoding): unwraps sealed-topic
+	// epoch keys and sealed notify bodies (sealing-keys.md D50). Owner-bound
+	// like the persona signing key; used rarely, released artifacts only —
+	// never the seed (D51).
+	KindPersonaSealingKey Kind = "persona-sealing-key"
 )
 
 // Entry is a vault key as the API shows it: never the secret. The binding
@@ -178,6 +187,19 @@ func derive(kind Kind, secret string) (string, error) {
 		}
 		pub := ed25519.NewKeyFromSeed(raw).Public().(ed25519.PublicKey)
 		return base64.StdEncoding.EncodeToString(pub), nil
+	case KindPersonaSealingKey:
+		raw, err := base64.StdEncoding.DecodeString(secret)
+		if err != nil {
+			return "", fmt.Errorf("vault: sealing seed is not base64: %w", err)
+		}
+		if len(raw) != curve25519.ScalarSize {
+			return "", fmt.Errorf("vault: sealing seed decodes to %d bytes, want %d", len(raw), curve25519.ScalarSize)
+		}
+		pub, err := curve25519.X25519(raw, curve25519.Basepoint)
+		if err != nil {
+			return "", fmt.Errorf("vault: derive sealing public key: %w", err)
+		}
+		return base64.StdEncoding.EncodeToString(pub), nil
 	default:
 		return "", fmt.Errorf("vault: unknown key kind %q", kind)
 	}
@@ -201,7 +223,7 @@ func (v *Vault) Import(name string, kind Kind, secret, account, user string) (En
 		if user != "" {
 			return Entry{}, fmt.Errorf("vault: an account signing key binds to an account, not a user (got user %q)", user)
 		}
-	case KindPersonaSigningKey:
+	case KindPersonaSigningKey, KindPersonaSealingKey:
 		if !nkeys.IsValidPublicAccountKey(account) || user == "" {
 			return Entry{}, fmt.Errorf("vault: a persona key needs its owner binding (a public account key and a user name)")
 		}
@@ -249,6 +271,69 @@ func (v *Vault) GeneratePersonaKey(name, account, user string) (Entry, error) {
 	}
 	seed := base64.StdEncoding.EncodeToString(priv.Seed())
 	return v.Import(name, KindPersonaSigningKey, seed, account, user)
+}
+
+// GenerateSealingKey creates a persona's X25519 sealing key inside the
+// vault, bound to its owner, or returns the existing entry when name is
+// already present with the same owner — the D26 materialization pattern,
+// realized for sealing (sealing-keys.md D50). On a cross-instance
+// first-touch race (Create → ErrExists) it re-reads and returns the
+// winner's entry when kind and owner match — both racers were the same
+// rightful first touch. The seed never leaves the vault; there is no
+// export path for sealing keys (D7 stays creds-only).
+func (v *Vault) GenerateSealingKey(name, account, user string) (Entry, error) {
+	if e, err := v.Get(name); err == nil {
+		if e.Kind != KindPersonaSealingKey || e.Account != account || e.User != user {
+			return Entry{}, fmt.Errorf("vault: %s exists with another owner or kind", name)
+		}
+		return e, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return Entry{}, err
+	}
+	raw := make([]byte, curve25519.ScalarSize)
+	if _, err := rand.Read(raw); err != nil {
+		return Entry{}, fmt.Errorf("vault: generate sealing key: %w", err)
+	}
+	seed := base64.StdEncoding.EncodeToString(raw)
+	e, err := v.Import(name, KindPersonaSealingKey, seed, account, user)
+	if errors.Is(err, ErrExists) {
+		if won, gerr := v.Get(name); gerr == nil &&
+			won.Kind == KindPersonaSealingKey && won.Account == account && won.User == user {
+			return won, nil
+		}
+		return Entry{}, fmt.Errorf("vault: %s exists with another owner or kind", name)
+	}
+	return e, err
+}
+
+// Unwrap opens an anonymous sealed box addressed to a sealing key and
+// releases the plaintext — an artifact (an epoch key, a notify body),
+// never identity material (sealing-keys.md D51). The seed stays inside;
+// the result is never (nil, nil).
+func (v *Vault) Unwrap(name string, wrapped []byte) ([]byte, error) {
+	s, err := v.load(name)
+	if err != nil {
+		return nil, err
+	}
+	if s.Kind != KindPersonaSealingKey {
+		return nil, fmt.Errorf("vault: %s is %q — unwrapping needs a sealing key", name, s.Kind)
+	}
+	raw, err := base64.StdEncoding.DecodeString(s.Secret)
+	if err != nil || len(raw) != curve25519.ScalarSize {
+		return nil, fmt.Errorf("vault: key %s is unreadable", name)
+	}
+	pubSlice, err := curve25519.X25519(raw, curve25519.Basepoint)
+	if err != nil {
+		return nil, fmt.Errorf("vault: key %s is unreadable: %w", name, err)
+	}
+	var priv, pub [32]byte
+	copy(priv[:], raw)
+	copy(pub[:], pubSlice)
+	plain, ok := box.OpenAnonymous(nil, wrapped, &pub, &priv)
+	if !ok {
+		return nil, fmt.Errorf("vault: %s cannot open this box — not sealed to this key, or corrupted", name)
+	}
+	return plain, nil
 }
 
 // GenerateUserKey creates a NATS user key inside the vault, or returns the

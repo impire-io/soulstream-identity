@@ -25,6 +25,9 @@ func PersonaScopePubAllow(prefix string) []string {
 		root + ".{{account-subject()}}.{{name()}}.keys.public",
 		root + ".{{account-subject()}}.{{name()}}.grants.>",
 		root + ".{{account-subject()}}.{{name()}}.approvals.>",
+		// The sealing custodian's one op (sealing-keys.md D52): unwrapping
+		// is the persona's own act on its own prefix, like signing.
+		root + ".{{account-subject()}}.{{name()}}.seal.unwrap",
 		"SOULSTREAM.>",
 		"$JS.API.>",
 		"$KV.>",
