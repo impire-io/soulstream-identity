@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,6 +148,16 @@ func TestBar1ProviderArm(t *testing.T) {
 	probeStop := make(chan struct{})
 	probeFail := make(chan error, 1)
 	probes := 0
+	// The probe must be joined before the deletion cleanup frees A's
+	// name — on the first live run (2026-08-27) a straggling iteration
+	// re-created A mid-cleanup and leaked it. t.Cleanup is LIFO:
+	// registered here, after the deletion cleanup, this runs first.
+	var probeErr error
+	stopProbe := sync.OnceFunc(func() {
+		close(probeStop)
+		probeErr = <-probeFail // nil once the goroutine closes it on its way out
+	})
+	t.Cleanup(stopProbe)
 	go func() {
 		for {
 			select {
@@ -231,9 +242,9 @@ func TestBar1ProviderArm(t *testing.T) {
 		t.Fatalf("resume: %v", err)
 	}
 
-	close(probeStop)
-	if err, ok := <-probeFail; ok && err != nil {
-		t.Fatalf("the pre-existing account did not serve continuously: %v", err)
+	stopProbe()
+	if probeErr != nil {
+		t.Fatalf("the pre-existing account did not serve continuously: %v", probeErr)
 	}
 	t.Logf("A probed %d times through the window, uninterrupted", probes)
 }
