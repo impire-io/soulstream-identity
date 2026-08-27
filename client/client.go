@@ -42,6 +42,7 @@ type Key struct {
 const (
 	KindNATSAccountSigningKey = "nats-account-signing-key"
 	KindNATSUserKey           = "nats-user-key"
+	KindNATSOperatorKey       = "nats-operator-key"
 	KindPersonaSigningKey     = "persona-signing-key"
 )
 
